@@ -27,9 +27,12 @@ interface KnowledgeReaderTarget {
   // Stable document UUID.
   // 稳定文档 UUID。
   documentId: string;
-  // Inclusive hit range, absent when opened from the directory tree.
-  // 包含边界命中范围；从目录树打开时不存在。
+  // Inclusive body hit range, absent for directory and summary opens.
+  // 包含边界的正文命中范围；从目录或摘要打开时省略。
   hit?: { start: number; end: number };
+  // Selected search chunk, independent of any body range.
+  // 选中的检索切块，与正文行范围独立。
+  chunkId?: string;
 }
 
 // A directory subtree has one exact physical library, canonical path and document-open callback.
@@ -140,8 +143,8 @@ interface KnowledgeSearchResultsProps {
   // Currently opened target for selection styling.
   // 当前打开目标，用于选择样式。
   active: KnowledgeReaderTarget | null;
-  // Opens an exact hit document at its line range.
-  // 在命中行范围打开精确命中文档。
+  // Opens the matched document, focusing the range for body hits.
+  // 打开命中文档，正文命中时聚焦对应行范围。
   onOpen: (target: KnowledgeReaderTarget) => void;
   // Returns to the directory tree without issuing another query.
   // 返回目录树，不发起其他查询。
@@ -162,9 +165,9 @@ function KnowledgeSearchResults({ libraryId, query, active, onOpen, onClose }: K
   // A new submitted query revokes the previous result projection.
   // 新提交查询撤销先前结果投影。
   const read = useKnowledgeRead(JSON.stringify([libraryId, query]), load);
-  // Each hit opens at its own range; selection compares the exact document and range.
-  // 每个命中在其自身范围打开；选择比较精确文档及范围。
-  const isActive = (hit: KnowledgeSearchHit) => active !== null && active.documentId === hit.documentId && active.hit !== undefined && active.hit.start === hit.startLine;
+  // Selection is by chunk identity because summaries have no reading range.
+  // 摘要没有正文读取范围，因此按切块身份标记选中状态。
+  const isActive = (hit: KnowledgeSearchHit) => active?.documentId === hit.documentId && active.chunkId === hit.chunkId;
   return <>
     <div className="knowledge-pane-head"><span>{read.value === null ? t("knowledge.content.search") : fillKnowledgeText(t("knowledge.content.results"), { count: read.value.hits.length })}</span><Button variant="ghost" size="sm" onClick={onClose}>{t("knowledge.content.backToContents")}</Button></div>
     <div className="knowledge-pane-body">
@@ -173,12 +176,17 @@ function KnowledgeSearchResults({ libraryId, query, active, onOpen, onClose }: K
       {read.value !== null ? <>
         {read.value.libraries.map((status) => <p className="knowledge-search-status" key={status.libraryId}>{t(KNOWLEDGE_MODE_COPY[status.indexMode].label)} · {fillKnowledgeText(t("knowledge.content.capabilities"), { fts: formatKnowledgeIndexStatus(status.ftsStatus, t), pending: status.embeddings.pending, failed: status.embeddings.failed })}</p>)}
         {read.value.failures.map((failure, index) => <pre role="alert" className="knowledge-error" key={index}>{failure.error}</pre>)}
-        {read.value.hits.map((hit) => <button type="button" className="knowledge-hit" aria-current={isActive(hit)} title={String(hit.score)} key={JSON.stringify([hit.chunkId, hit.contentSha256, hit.revision])} onClick={() => onOpen({ documentId: hit.documentId, hit: { start: hit.startLine, end: hit.endLine } })}>
-          <span className="knowledge-hit-title"><span>{hit.title}</span><small>{fillKnowledgeText(t("knowledge.content.lines"), { start: hit.startLine, end: hit.endLine })}</small></span>
-          <span className="knowledge-hit-path">{hit.headingPath !== "" ? hit.path + " › " + hit.headingPath : hit.path}</span>
-          <span className="knowledge-hit-snippet">{highlightSnippet(hit.content, query)}</span>
-          <span className="knowledge-hit-kinds">{hit.matchKinds.map((kind) => <span className="knowledge-badge" data-tone={Object.hasOwn(MATCH_KINDS, kind) ? MATCH_KINDS[kind].tone : "neutral"} key={kind}>{Object.hasOwn(MATCH_KINDS, kind) ? t(MATCH_KINDS[kind].label) : kind}</span>)}</span>
-        </button>)}
+        {read.value.hits.map((hit) => {
+          // Summary chunks use zero as a sentinel; the reader defaults to page one for them.
+          // 摘要切块用零作为标记；阅读器为它们打开正文首页。
+          const range = hit.kind === "summary" ? undefined : { start: hit.startLine, end: hit.endLine };
+          return <button type="button" className="knowledge-hit" aria-current={isActive(hit)} title={String(hit.score)} key={JSON.stringify([hit.chunkId, hit.contentSha256, hit.revision])} onClick={() => onOpen({ documentId: hit.documentId, chunkId: hit.chunkId, hit: range })}>
+            <span className="knowledge-hit-title"><span>{hit.title}</span><small>{range === undefined ? t("knowledge.reader.summary") : fillKnowledgeText(t("knowledge.content.lines"), range)}</small></span>
+            <span className="knowledge-hit-path">{hit.headingPath !== "" ? hit.path + " › " + hit.headingPath : hit.path}</span>
+            <span className="knowledge-hit-snippet">{highlightSnippet(hit.content, query)}</span>
+            <span className="knowledge-hit-kinds">{hit.matchKinds.map((kind) => <span className="knowledge-badge" data-tone={Object.hasOwn(MATCH_KINDS, kind) ? MATCH_KINDS[kind].tone : "neutral"} key={kind}>{Object.hasOwn(MATCH_KINDS, kind) ? t(MATCH_KINDS[kind].label) : kind}</span>)}</span>
+          </button>;
+        })}
         {read.value.hits.length === 0 ? <p className="knowledge-pane-note">{t("knowledge.content.noHits")}</p> : null}
       </> : null}
     </div>

@@ -80,8 +80,8 @@ export interface KnowledgeLibrarySettings {
   // Explicit index mode.
   // 显式索引模式。
   indexMode: KnowledgeIndexMode;
-  // Required only in vector modes.
-  // 仅向量模式必填。
+  // Required in vector modes and retained as a saved selection while they are disabled.
+  // 向量模式下必填，关闭向量模式时保留为已保存选择。
   embedding: KnowledgeEmbeddingSettings | null;
 }
 

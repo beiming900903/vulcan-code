@@ -227,17 +227,27 @@ pub struct KnowledgeLibrarySettings {
     /// Explicit index mode.
     /// 显式索引模式。
     pub index_mode: KnowledgeIndexMode,
-    /// Required only in vector modes.
-    /// 仅向量模式必填。
+    /// Required in vector modes and retained as a saved selection while they are disabled.
+    /// 向量模式下必填，关闭向量模式时保留为已保存选择。
     pub embedding: Option<KnowledgeEmbeddingSettings>,
 }
 
 impl KnowledgeLibrarySettings {
+    /// Returns the saved embedding only when the current mode permits vector work.
+    /// 仅当当前模式允许向量工作时返回已保存的嵌入配置。
+    pub fn enabled_embedding(&self) -> Option<&KnowledgeEmbeddingSettings> {
+        self.embedding
+            .as_ref()
+            .filter(|_| self.index_mode.has_vectors())
+    }
+
     /// Validates explicit settings; returns an English diagnostic for invalid mode or route data.
     /// 验证显式设置；模式或路由非法时返回英文诊断。
     pub fn validate(&self) -> Result<(), String> {
-        if self.index_mode.has_vectors() != self.embedding.is_some() {
-            return Err("ERR_KNOWLEDGE_EMBEDDING_REQUIRED: vector modes require an embedding route; other modes must omit it".into());
+        if self.index_mode.has_vectors() && self.embedding.is_none() {
+            return Err(
+                "ERR_KNOWLEDGE_EMBEDDING_REQUIRED: vector modes require an embedding route".into(),
+            );
         }
         if let Some(embedding) = &self.embedding {
             if embedding.dimensions == 0

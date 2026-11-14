@@ -255,25 +255,28 @@ pub(crate) fn search(app: &App) -> Vec<Row> {
         // Hit identity and exact citation range belong to the current server result.
         // 命中身份及精确引用范围属于当前服务结果。
         let id = s(hit, "/documentId");
-        rows.push(
-            item(
-                &s(hit, "/chunkId"),
-                s(hit, "/title"),
-                format!(
-                    "{}:{}–{}",
-                    s(hit, "/path"),
-                    n(hit, "/startLine"),
-                    n(hit, "/endLine")
-                ),
+        // Summary chunks have no body citation and open the existing first-page reader.
+        // 摘要切块没有正文引用范围，沿用首页阅读入口。
+        let location = if s(hit, "/kind") == "summary" {
+            format!("{} · {}", s(hit, "/path"), tr!("knowledge.reader.summary"))
+        } else {
+            format!(
+                "{}:{}–{}",
+                s(hit, "/path"),
+                n(hit, "/startLine"),
+                n(hit, "/endLine")
             )
-            .lines(vec![s(hit, "/content")])
-            .actions(vec![action(
-                tr!("knowledge.view"),
-                UiAction::Knowledge(KnowledgeAction::Document(
-                    KnowledgeDocumentAddress::Current(id),
-                )),
-                Tone::Accent,
-            )]),
+        };
+        rows.push(
+            item(&s(hit, "/chunkId"), s(hit, "/title"), location)
+                .lines(vec![s(hit, "/content")])
+                .actions(vec![action(
+                    tr!("knowledge.view"),
+                    UiAction::Knowledge(KnowledgeAction::Document(
+                        KnowledgeDocumentAddress::Current(id),
+                    )),
+                    Tone::Accent,
+                )]),
         );
     }
     if a(app.slots.value(Slot::KnowledgeSearch), "/hits").is_empty() {

@@ -149,9 +149,9 @@ function KnowledgeDocumentWindow({ scope, loadWindow, initialLine, highlight, sh
   // Prior starts are explicit service continuations; page size is never duplicated in this client.
   // 先前首行均为明确服务续读值；此客户端不复制页大小。
   const [starts, setStarts] = React.useState([initialLine]);
-  // Source preserves original whitespace; rendered mode reuses conversation-markdown.
-  // 源码保留原空白；渲染模式复用 conversation-markdown。
-  const [rendered, setRendered] = React.useState(false);
+  // Open in the shared Markdown renderer; source mode keeps the original whitespace and hit markers.
+  // 默认使用共享 Markdown 渲染器；原文模式保留空白及命中标记。
+  const [rendered, setRendered] = React.useState(true);
   // The last explicit start owns the current body read.
   // 最后一个明确首行拥有当前正文读取。
   const start = starts[starts.length - 1];

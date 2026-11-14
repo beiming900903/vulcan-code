@@ -28,7 +28,7 @@ beforeEach(() => {
   vi.resetAllMocks(); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   service.list.mockResolvedValue(changes);
   service.detail.mockResolvedValue({ change: changes[0], items: [{ entity: "document", entityKey: knowledgeDocumentFixture.id, before: null, after: knowledgeDocumentFixture }], nextOffset: null });
-  service.body.mockResolvedValue({ document: knowledgeDocumentFixture, content: "Historical body", startLine: 1, endLine: 1, nextLine: null });
+  service.body.mockResolvedValue({ document: knowledgeDocumentFixture, content: "# Historical body", startLine: 1, endLine: 1, nextLine: null });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
@@ -86,7 +86,7 @@ describe("permanent history", () => {
     expect(service.body).not.toHaveBeenCalled();
     await act(async () => button(knowledgeDocumentFixture.path).click());
     expect(service.body).toHaveBeenCalledExactlyOnceWith({ libraryId: knowledgeLibraryFixture.id, seq: changes[0].seq, documentId: knowledgeDocumentFixture.id, side: "after", startLine: 1 });
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Historical body");
+    expect(document.querySelector('[role="dialog"] .knowledge-reader-body h1')?.textContent).toBe("Historical body");
     expect(knowledgeHistoryItemPath({ entity: "document", entityKey: knowledgeDocumentFixture.id, before: knowledgeDocumentFixture, after: null })).toBe(knowledgeDocumentFixture.path);
   });
 });

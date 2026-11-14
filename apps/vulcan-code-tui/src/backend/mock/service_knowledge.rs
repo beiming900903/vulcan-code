@@ -1107,7 +1107,7 @@ impl KnowledgeService {
                 let mode: KnowledgeIndexModeRequestPayload = request(call)?;
                 // Frozen response shape belongs solely to this new explicit request.
                 // 冻结响应形状仅属于此新明确请求。
-                let settings = Self::settings(mode.settings)?;
+                let mut settings = Self::settings(mode.settings)?;
                 // Stable operation identity survives every subsequent observation.
                 // 稳定操作身份跨每个后续观察保留。
                 let operation = self.id("operation");
@@ -1124,6 +1124,9 @@ impl KnowledgeService {
                     .is_some_and(|job| matches!(job["state"].as_str(), Some("queued" | "running")))
                 {
                     return Err("A synthetic knowledge operation is already active".into());
+                }
+                if settings["embedding"].is_null() {
+                    settings["embedding"] = library.summary["settings"]["embedding"].clone();
                 }
                 library.summary["settings"] = settings;
                 library.start(operation, "index_mode")

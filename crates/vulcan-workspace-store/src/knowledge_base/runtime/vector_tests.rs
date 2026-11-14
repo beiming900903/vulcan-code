@@ -290,13 +290,13 @@ pub(super) async fn settled(
     .expect("worker must settle before the local deadline")
 }
 
-/// Verifies four modes, real searches and removal of both derived capabilities on downgrade.
-/// 验证四种模式、真实检索以及降级时移除两种派生能力。
+/// Verifies all four search modes and incremental catch-up after a disabled interval.
+/// 验证四种检索模式，以及停用期间发生变化后的增量补索引。
 #[tokio::test]
 async fn four_modes_and_downgrade_obey_the_declared_capabilities() {
     // Every file and inference request belongs to an isolated local fixture.
     // 全部文件和推理请求属于隔离本地夹具。
-    let (_root, runtime, library) = fixture(KnowledgeIndexMode::Browse).await;
+    let (root, runtime, library) = fixture(KnowledgeIndexMode::Browse).await;
     // The counter excludes query embeddings so background behavior can be assessed independently.
     // 计数器排除查询嵌入，使后台行为可以独立评估。
     let calls = Arc::new(AtomicUsize::new(0));
@@ -393,6 +393,9 @@ async fn four_modes_and_downgrade_obey_the_declared_capabilities() {
             );
         }
     }
+    // Capture the published space and its deduplicated ready count before disabling it.
+    // 停用前记录已发布向量空间及其去重后的就绪数量。
+    let before_disable = settled(&runtime, &library).await;
     runtime
         .set_index_mode(
             &library,
@@ -400,23 +403,115 @@ async fn four_modes_and_downgrade_obey_the_declared_capabilities() {
         )
         .await
         .expect("downgrade");
-    // Downgrading removes derived state and preserves authoritative content.
-    // 降级移除派生状态并保留权威内容。
+    // Disabled modes expose no active vector work while the persisted selection remains available.
+    // 停用模式不公开活动向量工作，并保留已保存配置。
     let state = settled(&runtime, &library).await;
     assert!(state.active_space_id.is_none());
     assert_eq!((state.pending, state.ready, state.failed), (0, 0, 0));
     assert!(
-        !runtime
+        runtime
             .index_integrity(&library)
             .await
             .expect("integrity")
             .fts_present
     );
+    // Edits during the disabled interval may update local FTS but must issue no embedding request.
+    // 停用期间的编辑可以维护本地全文索引，但不得发起嵌入请求。
+    let previously_built = calls.load(Ordering::SeqCst);
+    let new_doc = runtime
+        .write_content(
+            &library,
+            "project",
+            KnowledgeWriteRequest {
+                embed: Some(KnowledgeEmbedPolicy::Summary),
+                summary: Some("New document summary".into()),
+                ..create("new.md", "new content")
+            },
+            ai(),
+        )
+        .await
+        .expect("write with vector mode disabled");
+    assert_eq!(new_doc.pending_embeddings, 0);
+    // The dormant FTS table must advance with the write before the mode is restored.
+    // 模式恢复前，已停用的全文索引表必须随写入推进。
+    let dormant_fts = runtime.index_integrity(&library).await.unwrap();
+    assert_eq!(dormant_fts.indexed_change_seq, new_doc.change_seq.unwrap());
+    assert_eq!(dormant_fts.indexed_chunk_count, dormant_fts.chunk_count);
+    settled(&runtime, &library).await;
+    assert_eq!(calls.load(Ordering::SeqCst), previously_built);
+    assert!(runtime.retry_embeddings(&library, &[]).await.is_err());
     assert!(
         runtime
             .read_document(&library, Some(&document.id), None, None, None)
             .await
             .is_ok()
+    );
+    // Reopen the real stores to prove both selection and indexes survive outside process memory.
+    // 重新打开真实存储，证明配置与索引均能跨进程保留。
+    let runtime = reopen(&root, runtime, &library, calls.clone()).await;
+    settled(&runtime, &library).await;
+    let dormant = runtime
+        .get_library(&library)
+        .await
+        .unwrap()
+        .settings
+        .unwrap();
+    assert_eq!(dormant.index_mode, KnowledgeIndexMode::Browse);
+    assert_eq!(
+        dormant.embedding,
+        vector_settings(KnowledgeIndexMode::Hybrid, "space-a").embedding
+    );
+    // Capture exact provider inputs so a full rebuild cannot pass by keeping the same batch count.
+    // 捕获精确供应商输入，避免全量重建因批次数相同而通过。
+    let inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    runtime
+        .set_embedding_executor(Arc::new({
+            let inputs = Arc::clone(&inputs);
+            move |request: KnowledgeEmbeddingRequest| {
+                if !request.is_query {
+                    inputs
+                        .lock()
+                        .unwrap()
+                        .extend(request.inputs.iter().cloned());
+                }
+                Box::pin(async move { Ok(fake_vectors(&request)) })
+            }
+        }))
+        .await
+        .unwrap();
+    settled(&runtime, &library).await;
+    runtime
+        .set_index_mode(
+            &library,
+            KnowledgeLibrarySettings {
+                index_mode: KnowledgeIndexMode::Hybrid,
+                embedding: dormant.embedding,
+            },
+        )
+        .await
+        .unwrap();
+    let restored = settled(&runtime, &library).await;
+    assert_eq!((restored.pending, restored.failed), (0, 0));
+    assert_eq!(restored.active_space_id, restored.desired_space_id);
+    assert_eq!(restored.active_space_id, before_disable.active_space_id);
+    assert_eq!(restored.ready, before_disable.ready + 1);
+    assert!(
+        matches!(inputs.lock().unwrap().as_slice(), [only] if only.contains("New document summary"))
+    );
+    // The retained full-text publication must already cover the new document.
+    // 保留的全文索引发布必须已覆盖新增文档。
+    let fts = runtime.index_integrity(&library).await.unwrap();
+    assert!(fts.healthy);
+    assert_eq!(fts.indexed_change_seq, new_doc.change_seq.unwrap());
+    assert!(
+        runtime
+            .search(&[library], &["new content".into()], 20)
+            .await
+            .unwrap()
+            .hits
+            .iter()
+            .any(|hit| hit.document_id == new_doc.documents[0].id
+                && hit.match_kinds.iter().any(|kind| kind == "bm25"))
     );
 }
 

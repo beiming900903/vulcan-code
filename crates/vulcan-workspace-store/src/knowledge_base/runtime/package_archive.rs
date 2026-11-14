@@ -223,6 +223,11 @@ pub(super) fn prepare_knowledge_package(
     let manifest: KnowledgePackageManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("ERR_KNOWLEDGE_PACKAGE_MANIFEST: {error}"))?;
     manifest.settings.validate()?;
+    if !manifest.settings.index_mode.has_vectors() && manifest.settings.embedding.is_some() {
+        return Err(
+            "ERR_KNOWLEDGE_EMBEDDING_REQUIRED: nonvector packages omit the embedding route".into(),
+        );
+    }
     fts::validate_custom_words(&manifest.custom_words)?;
     if library::validate_library_name(&manifest.name)? != manifest.name {
         return Err("ERR_KNOWLEDGE_PACKAGE_NAME_NOT_CANONICAL".into());
@@ -307,7 +312,10 @@ pub(super) fn write_package(
     let destination = canonical_existing_directory(destination)?;
     // Current active library settings are mandatory, never defaulted for invalid formats.
     // 当前活动知识库设置必填，非法格式绝不取默认值。
-    let settings = library.settings.ok_or("ERR_KNOWLEDGE_SETTINGS_MISSING")?;
+    let mut settings = library.settings.ok_or("ERR_KNOWLEDGE_SETTINGS_MISSING")?;
+    if !settings.index_mode.has_vectors() {
+        settings.embedding = None;
+    }
     // The manifest contains only current configuration and content integrity metadata.
     // 清单只包含当前配置和内容完整性元数据。
     let manifest = KnowledgePackageManifest {

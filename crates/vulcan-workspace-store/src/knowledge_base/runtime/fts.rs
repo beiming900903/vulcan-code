@@ -8,27 +8,48 @@ use vulcan_sqlite_engine::{
     tokenizer::{self, TokenizerMode},
 };
 
-/// Rebuilds or removes FTS in the caller's transaction; returns exact storage errors.
-/// 在调用方事务内重建或删除全文索引；返回精确存储错误。
-pub(super) fn rebuild_fts(connection: &Connection, enabled: bool) -> Result<(), String> {
-    if enabled {
-        ensure_fts_index(connection, KNOWLEDGE_FTS_INDEX, TokenizerMode::Jieba)
-            .map_err(|e| e.to_string())?;
-        connection.execute_batch(&format!("DELETE FROM {KNOWLEDGE_FTS_INDEX};
+/// Rebuilds FTS for the current chunks and dictionary in the caller's transaction.
+/// 在调用方事务内为当前切块及词典重建全文索引。
+pub(super) fn rebuild_fts(connection: &Connection) -> Result<(), String> {
+    ensure_fts_index(connection, KNOWLEDGE_FTS_INDEX, TokenizerMode::Jieba)
+        .map_err(|e| e.to_string())?;
+    connection.execute_batch(&format!("DELETE FROM {KNOWLEDGE_FTS_INDEX};
             INSERT INTO {KNOWLEDGE_FTS_INDEX}(id,file_path,title,content)
             SELECT c.id,d.path,d.title,c.text FROM kb_chunks c JOIN kb_documents d ON d.id=c.document_id;
             UPDATE knowledge_metadata SET value=(SELECT value FROM knowledge_metadata WHERE key='head_change_seq') WHERE key='indexed_change_seq';
             UPDATE knowledge_metadata SET value=(SELECT value FROM knowledge_metadata WHERE key='dictionary_revision') WHERE key='indexed_dictionary_revision';
             UPDATE knowledge_metadata SET value='ready' WHERE key='index_status';")).map_err(|e|e.to_string())?;
-    } else {
-        connection
-            .execute_batch(&format!(
-                "DROP TABLE IF EXISTS {KNOWLEDGE_FTS_INDEX};
-            UPDATE knowledge_metadata SET value='disabled' WHERE key='index_status';"
-            ))
-            .map_err(|e| e.to_string())?;
-    }
     Ok(())
+}
+
+/// Reports whether this library has a stored FTS table, even with search disabled.
+/// 报告此库是否保存有全文索引表，包括检索停用时。
+pub(super) fn is_present(connection: &Connection) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?);",
+            [KNOWLEDGE_FTS_INDEX],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// Checks the index publication marker and revisions using the same SQLite connection.
+/// 使用同一 SQLite 连接检查索引发布标记与修订。
+pub(super) fn is_current(connection: &Connection) -> Result<bool, String> {
+    let ready: bool = connection
+        .query_row(
+            "SELECT value='ready' FROM knowledge_metadata WHERE key='index_status';",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(ready
+        && is_present(connection)?
+        && metadata_integer(connection, "head_change_seq")?
+            == metadata_integer(connection, "indexed_change_seq")?
+        && metadata_integer(connection, "dictionary_revision")?
+            == metadata_integer(connection, "indexed_dictionary_revision")?)
 }
 
 /// Reads one exact nonnegative metadata integer; returns corruption rather than a guessed default.
@@ -110,7 +131,9 @@ impl KnowledgeBaseRuntime {
                     None => { tokenizer::remove_custom_word(&transaction, &word).map_err(|error|error.to_string())?; }
                 }
                 transaction.execute("UPDATE knowledge_metadata SET value=CAST(value AS INTEGER)+1 WHERE key='dictionary_revision';", []).map_err(|error|error.to_string())?;
-                rebuild_fts(&transaction, settings.index_mode.has_fts())?;
+                if settings.index_mode.has_fts() || is_present(&transaction)? {
+                    rebuild_fts(&transaction)?;
+                }
                 transaction.commit().map_err(|error|error.to_string())
             })();
             resync_dictionary_after_rollback(connection, outcome)
@@ -147,7 +170,9 @@ impl KnowledgeBaseRuntime {
                 let transaction = connection
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .map_err(|e| e.to_string())?;
-                rebuild_fts(&transaction, settings.index_mode.has_fts())?;
+                if settings.index_mode.has_fts() {
+                    rebuild_fts(&transaction)?;
+                }
                 transaction.commit().map_err(|e| e.to_string())
             },
         )
@@ -174,7 +199,7 @@ impl KnowledgeBaseRuntime {
         let (_, binding_id) = self.ensure_library_binding(library_id).await?;
         local_sql::with_read_snapshot_async(&self.host_runtime.local,self.resolve_library_binding(&binding_id)?,move |connection|{
             tokenizer::ensure_jieba_tokenizer_registered(connection).map_err(|e|e.to_string())?;
-            let present=connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?);",[KNOWLEDGE_FTS_INDEX],|row|row.get::<_,bool>(0)).map_err(|e|e.to_string())?;
+            let present=is_present(connection)?;
             let document_count=connection.query_row("SELECT COUNT(*) FROM kb_documents;",[],|row|unsigned_column(row,0)).map_err(|e|e.to_string())?;
             let chunk_count=connection.query_row("SELECT COUNT(*) FROM kb_chunks;",[],|row|unsigned_column(row,0)).map_err(|e|e.to_string())?;
             let (indexed_chunk_count,mismatched_rows)=if present {
@@ -189,7 +214,7 @@ impl KnowledgeBaseRuntime {
             let indexed_change_seq=metadata_integer(connection,"indexed_change_seq")?;
             let dictionary_revision=metadata_integer(connection,"dictionary_revision")?;
             let indexed_dictionary_revision=metadata_integer(connection,"indexed_dictionary_revision")?;
-            let healthy=if settings.index_mode.has_fts(){present && chunk_count==indexed_chunk_count && mismatched_rows==0 && head_change_seq==indexed_change_seq && dictionary_revision==indexed_dictionary_revision}else{!present};
+            let healthy=!settings.index_mode.has_fts() || (present && chunk_count==indexed_chunk_count && mismatched_rows==0 && head_change_seq==indexed_change_seq && dictionary_revision==indexed_dictionary_revision);
             Ok(KnowledgeIndexIntegritySummary{index_mode:settings.index_mode,document_count,chunk_count,fts_present:present,indexed_chunk_count,mismatched_rows,head_change_seq,indexed_change_seq,dictionary_revision,indexed_dictionary_revision,healthy})
         }).await
     }
@@ -253,7 +278,9 @@ impl KnowledgeBaseRuntime {
                 }
                 for entry in words {tokenizer::upsert_custom_word(&transaction,&entry.word,entry.weight as usize).map_err(|e|e.to_string())?;}
                 transaction.execute("UPDATE knowledge_metadata SET value=CAST(value AS INTEGER)+1 WHERE key='dictionary_revision';",[]).map_err(|e|e.to_string())?;
-                rebuild_fts(&transaction,settings.index_mode.has_fts())?;
+                if settings.index_mode.has_fts() || is_present(&transaction)? {
+                    rebuild_fts(&transaction)?;
+                }
                 transaction.commit().map_err(|e|e.to_string())
             })();
             resync_dictionary_after_rollback(connection, outcome)

@@ -52,9 +52,24 @@ pub(super) fn search(result: &KnowledgeSearchResult) -> String {
         output.push_str("\nNo results.\n");
     }
     for hit in &result.hits {
-        output.push_str(&format!("\n## {}\n\nLibrary: {} ({})\nDocument ID: {}\nPath: {}\nKind: {} · lines {}-{}\nHeading: {}\n\n{}\n",
-            inline_code(&hit.title), inline_code(&hit.library_name), inline_code(&hit.library_id),
-            inline_code(&hit.document_id), inline_code(&hit.path), hit.kind, hit.start_line, hit.end_line, inline_code(&hit.heading_path), hit.content));
+        // A summary's zero range cannot be passed to knowledge_read.
+        // 摘要的零值范围不能传给 knowledge_read。
+        let citation = if hit.kind == "summary" {
+            String::from("summary (document-level; omit the line range when reading)")
+        } else {
+            format!("{} · lines {}-{}", hit.kind, hit.start_line, hit.end_line)
+        };
+        output.push_str(&format!(
+            "\n## {}\n\nLibrary: {} ({})\nDocument ID: {}\nPath: {}\nKind: {}\nHeading: {}\n\n{}\n",
+            inline_code(&hit.title),
+            inline_code(&hit.library_name),
+            inline_code(&hit.library_id),
+            inline_code(&hit.document_id),
+            inline_code(&hit.path),
+            citation,
+            inline_code(&hit.heading_path),
+            hit.content
+        ));
     }
     for failure in &result.failures {
         output.push_str(&format!(

@@ -546,13 +546,10 @@ fn commit_snapshot(
         .map_err(|e| e.to_string())?;
     // An incremental write must not declare a partially built upgrade fully indexed.
     // 增量写入不得将部分构建的升级宣告为全部已索引。
-    let index_was_ready = transaction
-        .query_row(
-            "SELECT value='ready' FROM knowledge_metadata WHERE key='index_status';",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(|error| error.to_string())?;
+    let index_was_ready = super::fts::is_current(&transaction)?;
+    // Keep a previously built index current through writes even when FTS search is disabled.
+    // 即使停用全文检索，也让已建索引随写入保持最新。
+    let maintain_fts = settings.index_mode.has_fts() || super::fts::is_present(&transaction)?;
     // One invocation always produces exactly one change, including a no-op human restore.
     // 一次调用始终只产生一条变更，包括无差异人工还原。
     let now = unix_epoch_millis()?;
@@ -585,14 +582,14 @@ fn commit_snapshot(
         .filter(|key| before_folders.get(*key) != after_folders.get(*key))
         .cloned()
         .collect();
-    if settings.index_mode.has_fts() {
+    if maintain_fts {
         ensure_fts_index(&transaction, KNOWLEDGE_FTS_INDEX, TokenizerMode::Jieba)
             .map_err(|e| e.to_string())?;
     }
     // Delete all changed current rows before insertion so restores can safely undo path swaps.
     // 插入前删除全部变更当前行，使还原可以安全撤销路径交换。
     for id in &changed_ids {
-        if settings.index_mode.has_fts() {
+        if maintain_fts {
             transaction.execute(&format!("DELETE FROM {KNOWLEDGE_FTS_INDEX} WHERE id IN (SELECT id FROM kb_chunks WHERE document_id=?);"),[id]).map_err(|e|e.to_string())?;
         }
         transaction
@@ -612,7 +609,7 @@ fn commit_snapshot(
             }
             document.updated_change_seq = seq;
             save_document(&transaction, document)?;
-            rebuild_document(&transaction, document, settings.index_mode.has_fts())?;
+            rebuild_document(&transaction, document, maintain_fts)?;
             affected.push(document.clone());
         }
         transaction.execute("INSERT INTO kb_change_items(change_seq,ordinal,entity,entity_key,before_json,after_json) VALUES(?,?,'document',?,?,?);",
@@ -645,7 +642,7 @@ fn commit_snapshot(
             [seq.to_string()],
         )
         .map_err(|e| e.to_string())?;
-    if settings.index_mode.has_fts() && index_was_ready {
+    if index_was_ready {
         transaction
             .execute(
                 "UPDATE knowledge_metadata SET value=? WHERE key='indexed_change_seq';",
@@ -677,8 +674,8 @@ fn unchanged_receipt(
     settings: &KnowledgeLibrarySettings,
     unchanged: Vec<String>,
 ) -> Result<KnowledgeWriteResult, String> {
-    let pending_embeddings = match &settings.embedding {
-        Some(embedding) if settings.index_mode.has_vectors() => {
+    let pending_embeddings = match settings.enabled_embedding() {
+        Some(embedding) => {
             super::vector::current_counts(connection, &vector_space_id(embedding)?)?.0
         }
         _ => 0,

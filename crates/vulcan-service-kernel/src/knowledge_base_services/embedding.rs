@@ -187,7 +187,7 @@ async fn execute_embedding(
         if library
             .settings
             .as_ref()
-            .and_then(|settings| settings.embedding.as_ref())
+            .and_then(KnowledgeLibrarySettings::enabled_embedding)
             != Some(&request.embedding)
         {
             return Err("ERR_KNOWLEDGE_EMBEDDING_SUPERSEDED".into());

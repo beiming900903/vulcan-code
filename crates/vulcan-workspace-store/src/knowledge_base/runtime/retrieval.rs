@@ -219,12 +219,16 @@ impl KnowledgeBaseRuntime {
         };
         // Read the nullable active snapshot while holding the publication lease.
         // 持发布租约时读取可空活动快照。
-        let active = local_sql::with_read_snapshot_async(
-            &self.host_runtime.local,
-            self.resolve_library_binding(&binding)?,
-            vector::active_embedding,
-        )
-        .await?;
+        let active = if settings.index_mode.has_vectors() {
+            local_sql::with_read_snapshot_async(
+                &self.host_runtime.local,
+                self.resolve_library_binding(&binding)?,
+                vector::active_embedding,
+            )
+            .await?
+        } else {
+            None
+        };
         // Full-text ranks retain hashes so a concurrent body change cannot project unranked new text.
         // 全文排名保留哈希，避免并发正文变更投影未经排名的新文本。
         let mut fts_ranks = BTreeMap::new();

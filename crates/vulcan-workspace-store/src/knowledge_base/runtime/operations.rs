@@ -64,16 +64,11 @@ impl KnowledgeBaseRuntime {
                 let transaction = connection
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .map_err(|error| error.to_string())?;
-                transaction
-                    .execute(
-                        "UPDATE knowledge_metadata SET value=? WHERE key='index_status';",
-                        [if settings.index_mode.has_fts() {
-                            "building"
-                        } else {
-                            "disabled"
-                        }],
-                    )
-                    .map_err(|error| error.to_string())?;
+                if settings.index_mode.has_fts() {
+                    transaction
+                        .execute("UPDATE knowledge_metadata SET value='building' WHERE key='index_status';", [])
+                        .map_err(|error| error.to_string())?;
+                }
                 transaction
                     .execute(
                         "UPDATE knowledge_metadata SET value='0' WHERE key='vector_worker_paused';",
@@ -155,42 +150,44 @@ impl KnowledgeBaseRuntime {
             .ok_or("ERR_KNOWLEDGE_OPERATION_NOT_FOUND".into())
     }
 
-    /// Immediately saves the explicit target mode and queues capability construction; returns a durable job.
-    /// 立即保存显式目标模式并排队能力构建；返回持久任务。
-    /// Removed capabilities are deleted before returning, and active old vector space survives a replacement build.
-    /// 返回前删除移除的能力，更换构建期间保留原活动向量空间。
+    /// Saves the requested mode and optional embedding for `library_id`; returns a durable catch-up job.
+    /// 为 `library_id` 保存所请求模式及可选嵌入配置；返回持久补索引任务。
+    /// Disabled capabilities retain their last selection and on-disk indexes.
+    /// 暂停的检索能力保留原配置与磁盘索引。
     pub async fn set_index_mode(
         &self,
         library_id: &str,
-        settings: KnowledgeLibrarySettings,
+        mut settings: KnowledgeLibrarySettings,
     ) -> Result<KnowledgeOperationSummary, String> {
-        settings.validate()?;
         // All mode transitions serialize with content, restore and deletion.
         // 全部模式过渡与内容、还原和删除串行化。
         let guard = self.library_mutation_guard(library_id).await?;
-        self.require_active_library(library_id).await?;
+        let current = self
+            .require_active_library(library_id)
+            .await?
+            .settings
+            .ok_or("ERR_KNOWLEDGE_SETTINGS_MISSING")?;
+        if !settings.index_mode.has_vectors() {
+            settings.embedding = current.embedding;
+        }
+        settings.validate()?;
         // A durable application job makes partial cross-database work resumable after restart.
         // 持久应用任务使跨数据库部分工作可在重启后恢复。
         let operation = self
             .begin_operation_locked(library_id, "index_mode", Some(&settings))
             .await?;
-        // Persist explicit building state before the background executor starts.
-        // 后台执行器开始前持久化显式构建中状态。
-        let (_, binding) = self.ensure_library_binding(library_id).await?;
-        local_sql::with_connection_async(&self.host_runtime.local,self.resolve_library_binding(binding)?,{
-            let settings=settings.clone();
-            move |connection|{
-                let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
-                if settings.index_mode.has_fts(){
-                    transaction.execute("UPDATE knowledge_metadata SET value='building' WHERE key='index_status';",[]).map_err(|e|e.to_string())?;
-                }else{fts::rebuild_fts(&transaction,false)?;}
-                transaction.execute("INSERT INTO knowledge_metadata(key,value) VALUES('vector_worker_paused','0') ON CONFLICT(key) DO UPDATE SET value='0';",[]).map_err(|e|e.to_string())?;
-                vector::queue_current_embeddings(&transaction,&settings)?;
-                transaction.commit().map_err(|e|e.to_string())
-            }
-        }).await?;
-        if !settings.index_mode.has_vectors() {
-            self.clear_vector_tables_locked(library_id).await?;
+        // Expose the exact new backlog before returning; the worker also queues it on recovery.
+        // 返回前公开精确的新积压；后台工作器在恢复时也会排队。
+        if settings.enabled_embedding().is_some() {
+            let (_, binding) = self.ensure_library_binding(library_id).await?;
+            local_sql::with_connection_async(
+                &self.host_runtime.local,
+                self.resolve_library_binding(binding)?,
+                move |connection| {
+                    vector::queue_current_embeddings(connection, &settings).map(|_| ())
+                },
+            )
+            .await?;
         }
         drop(guard);
         self.wake_knowledge_worker(library_id).await;
@@ -217,8 +214,7 @@ impl KnowledgeBaseRuntime {
         // The desired space is explicit; retry never changes routes or dimensions.
         // 期望空间显式确定；重试绝不改变路由或维度。
         let embedding = settings
-            .embedding
-            .as_ref()
+            .enabled_embedding()
             .ok_or("ERR_KNOWLEDGE_VECTOR_MODE_REQUIRED")?;
         // Use semantic identity rather than a mutable table generation.
         // 使用语义身份而非可变表代次。

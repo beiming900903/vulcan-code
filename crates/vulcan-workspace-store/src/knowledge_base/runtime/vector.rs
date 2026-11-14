@@ -56,9 +56,9 @@ pub(super) fn queue_current_embeddings(
     connection: &Connection,
     settings: &KnowledgeLibrarySettings,
 ) -> Result<u64, String> {
-    // Absence is an explicit property of nonvector modes, not a guessed route fallback.
-    // 缺失是非向量模式的显式属性，绝非猜测路由兜底。
-    let Some(embedding) = &settings.embedding else {
+    // Only enabled vector work can queue hashes for the saved selection.
+    // 只有启用向量能力时，才为已保存配置排队内容哈希。
+    let Some(embedding) = settings.enabled_embedding() else {
         return Ok(0);
     };
     // Semantic identity excludes batch configuration.
@@ -183,8 +183,8 @@ impl KnowledgeBaseRuntime {
         // 状态读取不调度或修改向量工作。
         let (_, binding) = self.ensure_library_binding(library_id).await?;
         local_sql::with_read_snapshot_async(&self.host_runtime.local,self.resolve_library_binding(binding)?,move |connection|{
-            let active=active_embedding(connection)?.as_ref().map(content::vector_space_id).transpose()?;
-            let desired=settings.embedding.as_ref().map(content::vector_space_id).transpose()?;
+            let desired=settings.enabled_embedding().map(content::vector_space_id).transpose()?;
+            let active=if desired.is_some(){active_embedding(connection)?.as_ref().map(content::vector_space_id).transpose()?}else{None};
             let paused=paused(connection)?;
             let (pending,ready,failed)=match &desired{Some(space)=>current_counts(connection,space)?,None=>(0,0,0)};
             let mut failures=Vec::new();
@@ -279,12 +279,12 @@ impl KnowledgeBaseRuntime {
         Ok(())
     }
 
-    /// Removes obsolete vector spaces after publication or all spaces on downgrade; caller owns the library lock.
-    /// 发布后移除过期向量空间，降级时移除全部；调用方拥有知识库锁。
+    /// Removes obsolete vector spaces after publishing `keep`; caller owns the library lock.
+    /// 发布 `keep` 后移除过期向量空间；调用方拥有知识库锁。
     async fn remove_vector_tables_locked(
         &self,
         library_id: &str,
-        keep: Option<&str>,
+        keep: &str,
     ) -> Result<(), String> {
         // Publication waits for queries holding the old space through inference and mapping.
         // 发布等待在推理与映射期间持有旧空间的查询。
@@ -292,9 +292,7 @@ impl KnowledgeBaseRuntime {
         // Ownership keys are the exact set of tables this library constructed.
         // 归属键精确限定该库构建的表集合。
         let (_, binding) = self.ensure_library_binding(library_id).await?;
-        // The keep identity is validated before any destructive derived cleanup.
-        // 破坏性派生清理前验证保留身份。
-        let keep = keep.map(str::to_string);
+        validate_sha256(keep)?;
         // Read only explicit space registrations, not guessed directory candidates.
         // 仅读取显式空间注册，不猜测目录候选。
         let spaces=local_sql::with_read_snapshot_async(&self.host_runtime.local,self.resolve_library_binding(&binding)?,|connection|{
@@ -302,7 +300,7 @@ impl KnowledgeBaseRuntime {
             statement.query_map([],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())
         }).await?;
         for space in spaces {
-            if keep.as_deref() == Some(&space) {
+            if keep == space {
                 continue;
             }
             let table = table_name(&space)?;
@@ -338,18 +336,6 @@ impl KnowledgeBaseRuntime {
             )
             .await?;
         }
-        Ok(())
-    }
-
-    /// Removes all vector capabilities on an explicit downgrade; returns only after exact derived cleanup.
-    /// 在显式降级时移除全部向量能力；精确派生清理完成后才返回。
-    pub(super) async fn clear_vector_tables_locked(&self, library_id: &str) -> Result<(), String> {
-        self.remove_vector_tables_locked(library_id, None).await?;
-        // State rows without a table may exist when construction was cancelled before creation.
-        // 构建在建表前取消时可能存在尚无表的状态行。
-        let (_, binding) = self.ensure_library_binding(library_id).await?;
-        local_sql::execute_script_async(&self.host_runtime.local,self.resolve_library_binding(binding)?,
-            "DELETE FROM kb_vector_state;UPDATE knowledge_metadata SET value='null' WHERE key='active_embedding';",vec![]).await?;
         Ok(())
     }
 }
@@ -446,14 +432,13 @@ impl KnowledgeBaseRuntime {
                     if paused(connection)? {
                         return Ok(true);
                     }
-                    let status = metadata(connection, "index_status")?;
-                    if (settings.index_mode.has_fts() && (status != "ready" || rebuild_requested))
-                        || (!settings.index_mode.has_fts() && status != "disabled")
+                    if settings.index_mode.has_fts()
+                        && (rebuild_requested || !fts::is_current(connection)?)
                     {
                         let transaction = connection
                             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                             .map_err(|e| e.to_string())?;
-                        fts::rebuild_fts(&transaction, settings.index_mode.has_fts())?;
+                        fts::rebuild_fts(&transaction)?;
                         transaction.commit().map_err(|e| e.to_string())?;
                     }
                     Ok(false)
@@ -464,10 +449,9 @@ impl KnowledgeBaseRuntime {
         if is_paused {
             return Ok(None);
         }
-        // Nonvector targets complete after FTS reconciliation and exact derived vector removal.
-        // 非向量目标在全文协调和精确派生向量移除后完成。
-        let Some(embedding) = settings.embedding.clone() else {
-            self.clear_vector_tables_locked(library_id).await?;
+        // A nonvector target completes after FTS reconciliation and keeps its saved vectors dormant.
+        // 非向量目标在全文协调后完成，保存的向量保持停用。
+        let Some(embedding) = settings.enabled_embedding().cloned() else {
             let count = local_sql::with_read_snapshot_async(
                 &self.host_runtime.local,
                 self.resolve_library_binding(&binding)?,
@@ -536,8 +520,7 @@ impl KnowledgeBaseRuntime {
                     )],
                 )
                 .await?;
-                self.remove_vector_tables_locked(library_id, Some(&space))
-                    .await?;
+                self.remove_vector_tables_locked(library_id, &space).await?;
                 self.update_knowledge_operation_locked(library_id, "completed", ready, ready, None)
                     .await?;
             } else {
@@ -603,8 +586,7 @@ impl KnowledgeBaseRuntime {
             .settings
             .ok_or("ERR_KNOWLEDGE_SETTINGS_MISSING")?;
         if settings
-            .embedding
-            .as_ref()
+            .enabled_embedding()
             .map(content::vector_space_id)
             .transpose()?
             .as_deref()

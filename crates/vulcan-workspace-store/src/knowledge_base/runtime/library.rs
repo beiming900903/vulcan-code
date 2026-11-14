@@ -69,7 +69,12 @@ impl KnowledgeBaseRuntime {
             let (_, binding) = self.ensure_library_binding(&library_id).await?;
             local_sql::with_connection_async(&self.host_runtime.local, self.resolve_library_binding(binding)?, {
                 let enabled = settings.index_mode.has_fts();
-                move |connection| fts::rebuild_fts(connection, enabled)
+                move |connection| {
+                    if enabled {
+                        fts::rebuild_fts(connection)?;
+                    }
+                    Ok(())
+                }
             }).await?;
             // Registry publication and every initial binding form one application transaction.
             // 注册发布及每项初始绑定构成一笔应用事务。
@@ -204,13 +209,19 @@ impl KnowledgeBaseRuntime {
         }.await;
         match inspected {
             Ok((settings, (documents, chunks, pending, head, last, status))) => {
+                summary.index_status = if !settings.index_mode.has_fts() {
+                    "disabled".into()
+                } else if matches!(status.as_str(), "empty" | "disabled") {
+                    "building".into()
+                } else {
+                    status
+                };
                 summary.settings = Some(settings);
                 summary.document_count = documents;
                 summary.chunk_count = chunks;
                 summary.pending_summary_count = pending;
                 summary.head_change_seq = head;
                 summary.last_change_at_ms = last;
-                summary.index_status = status;
             }
             Err(error) => {
                 summary.lifecycle_state = "error".into();
