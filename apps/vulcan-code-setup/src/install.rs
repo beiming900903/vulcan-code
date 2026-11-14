@@ -144,6 +144,7 @@ impl Choices {
                 .or(recorded.map(|state| state.channel))
                 .unwrap_or(Channel::Stable),
             route: options
+                .common
                 .route
                 .or(recorded.map(|state| state.route))
                 .unwrap_or_default(),
@@ -192,8 +193,12 @@ pub fn channels(channel: Channel) -> &'static [Channel] {
 /// before anything else: the options given, then the recorded choices, then the defaults.
 /// `install` 或 `update` 将使用的通道与下载源，用于在其他步骤之前查找更新的安装器：依次取给出的选项、
 /// 记录的选择与默认值。
-pub fn preferences(options: &InstallOptions, platform: Platform) -> (Channel, Route) {
-    let recorded = resolve_root(options.common.prefix.as_deref(), platform)
+pub fn preferences(
+    common: &CommonOptions,
+    channel: Option<Channel>,
+    platform: Platform,
+) -> (Channel, Route) {
+    let recorded = resolve_root(common.prefix.as_deref(), platform)
         .and_then(|root| root::ownership(&root))
         .ok()
         .and_then(|ownership| match ownership {
@@ -201,11 +206,10 @@ pub fn preferences(options: &InstallOptions, platform: Platform) -> (Channel, Ro
             _ => None,
         });
     (
-        options
-            .channel
+        channel
             .or(recorded.as_ref().map(|state| state.channel))
             .unwrap_or(Channel::Stable),
-        options
+        common
             .route
             .or(recorded.as_ref().map(|state| state.route))
             .unwrap_or_default(),
@@ -242,13 +246,14 @@ pub fn install(options: &InstallOptions) -> Result<(), String> {
         service: start.service,
         linger: start.linger,
         channel: start.channel,
+        route: start.route,
         port_range: start.port_range.clone().unwrap_or_default(),
     };
     // The terminal stays in the interactive installer from the wizard to the last page; the outcome
     // is printed once it is given back.
     // 终端从向导到最后一页都保持在交互式安装界面中；归还终端后再打印结果。
     let mut screen = Screen::open()?;
-    let outcome = interactive(&mut screen, platform, options, draft, browser);
+    let outcome = interactive(&mut screen, platform, draft, browser);
     drop(screen);
     outcome.map(|outcome| outcome.print())
 }
@@ -259,7 +264,6 @@ pub fn install(options: &InstallOptions) -> Result<(), String> {
 fn interactive(
     screen: &mut Screen,
     platform: Platform,
-    options: &InstallOptions,
     mut draft: Draft,
     browser: ComponentName,
 ) -> Result<Outcome, String> {
@@ -271,15 +275,11 @@ fn interactive(
         draft = chosen;
         let root = resolve_root(Some(Path::new(draft.root.trim())), platform)?;
         let ownership = root::installable(&root)?;
-        let route = match &ownership {
-            Ownership::Owned(state) => options.route.unwrap_or(state.route),
-            _ => options.route.unwrap_or_default(),
-        };
         let port_range = Some(draft.port_range.trim().to_owned()).filter(|range| !range.is_empty());
         let choices = Choices {
             gui: draft.gui,
             channel: draft.channel,
-            route,
+            route: draft.route,
             with: if draft.browser {
                 vec![browser.clone()]
             } else {

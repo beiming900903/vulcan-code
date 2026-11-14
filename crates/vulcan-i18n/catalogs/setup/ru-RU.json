@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "Источник загрузки",
+  "setup.route.auto": "Автоматически",
+  "setup.route.autoDetail": "Сначала используется международный источник, а при его недоступности — зеркало в материковом Китае.",
+  "setup.route.international": "Международный",
+  "setup.route.internationalDetail": "Использовать только {domain}.",
+  "setup.route.china": "Материковый Китай",
+  "setup.route.chinaDetail": "Использовать только {domain}.",
+  "setup.route.hint": "↑↓ Выбор · Enter Далее · Esc Отмена",
   "setup.title": "Установка Vulcan Code",
   "setup.step": "Шаг {current} из {total}",
   "setup.hint.choose": "↑↓ Выбор · Enter Далее · Esc Назад · Q Выход",

@@ -15,7 +15,8 @@ usage: vulcan-code-setup [install] [--yes] [--gui | --no-gui] [--with browser]
                          [--port-range <first>-<last> | --port-range default]
                          [--channel stable|preview] [--route auto|international|china]
                          [--prefix <dir>] [--self-update | --no-self-update]
-       vulcan-code-setup update [--yes] [--prefix <dir>] [--self-update | --no-self-update]
+       vulcan-code-setup update [--yes] [--prefix <dir>] [--route auto|international|china]
+                         [--self-update | --no-self-update]
        vulcan-code-setup uninstall [--yes] [--purge] [--prefix <dir>]
        vulcan-code-setup status [--prefix <dir>]
        vulcan-code-setup --version
@@ -41,7 +42,8 @@ status     shows what is installed and how to uninstall it
 --port-range ports the service may listen on, such as 18000-18029; `default` restores the
              built-in range; the service uses them from its next start
 --channel    stable (default) or preview
---route      download origins: auto (default), international, or china
+--route      download origins: auto, international, or china; when omitted, an interactive run
+             offers a choice, otherwise the recorded route or auto is used
 --prefix     installation directory; the platform default is used when omitted
 --self-update     updates and restarts this setup program automatically (default)
 --no-self-update  skips looking for a newer setup program
@@ -89,8 +91,8 @@ pub enum SelfUpdate {
     Never,
 }
 
-/// Options every command accepts.
-/// 每个命令都接受的选项。
+/// Shared command options; some are only accepted by `install` and `update`.
+/// 通用命令选项，其中部分选项仅供 `install` 与 `update` 使用。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommonOptions {
     /// Run without asking.
@@ -102,6 +104,9 @@ pub struct CommonOptions {
     /// Whether to update the setup program first; only `install` and `update` accept a choice.
     /// 是否先更新安装器；只有 `install` 与 `update` 接受此选择。
     pub self_update: SelfUpdate,
+    /// Download route for `install` and `update`; omitted to use the recorded choice or default.
+    /// `install` 和 `update` 的下载线路；省略时沿用记录的选择或默认值。
+    pub route: Option<Route>,
 }
 
 /// Options of `install`; `None` keeps the recorded choice or the default.
@@ -120,9 +125,6 @@ pub struct InstallOptions {
     /// Release channel.
     /// 发布通道。
     pub channel: Option<Channel>,
-    /// Download origins.
-    /// 下载源。
-    pub route: Option<Route>,
     /// Whether to create the menu entry or application bundle.
     /// 是否创建菜单项或应用程序包。
     pub menu: Option<bool>,
@@ -311,7 +313,7 @@ pub fn parse(arguments: &[String]) -> Result<Command, String> {
                         .map_err(|_| String::from("--channel accepts stable or preview"))?,
                 );
             }
-            "--route" => install.route = Some(parse_route(&value(flag)?)?),
+            "--route" => install.common.route = Some(parse_route(&value(flag)?)?),
             "--purge" => {
                 switch_only(flag)?;
                 purge = true;
@@ -322,7 +324,6 @@ pub fn parse(arguments: &[String]) -> Result<Command, String> {
     let install_only = install.gui.is_some()
         || !install.with.is_empty()
         || install.channel.is_some()
-        || install.route.is_some()
         || install.menu.is_some()
         || install.desktop_shortcut.is_some()
         || install.path.is_some()
@@ -335,10 +336,15 @@ pub fn parse(arguments: &[String]) -> Result<Command, String> {
     match verb {
         "install" if !purge => Ok(Command::Install(install)),
         "update" if !install_only && !purge => Ok(Command::Update(install.common)),
-        "status" if !install_only && !purge && self_update.is_none() => {
+        "status"
+            if !install_only
+                && !purge
+                && self_update.is_none()
+                && install.common.route.is_none() =>
+        {
             Ok(Command::Status(install.common))
         }
-        "uninstall" if !install_only && self_update.is_none() => {
+        "uninstall" if !install_only && self_update.is_none() && install.common.route.is_none() => {
             Ok(Command::Uninstall(UninstallOptions {
                 common: install.common,
                 purge,
@@ -368,6 +374,16 @@ fn parse_route(value: &str) -> Result<Route, String> {
         "international" => Ok(Route::International),
         "china" => Ok(Route::China),
         _ => Err(String::from("--route accepts auto, international or china")),
+    }
+}
+
+/// Returns the CLI value for `route` so a restarted installer can repeat the same choice.
+/// 返回 `route` 对应的命令行值，让重启后的安装器沿用同一选择。
+pub(crate) const fn route_name(route: Route) -> &'static str {
+    match route {
+        Route::Auto => "auto",
+        Route::International => "international",
+        Route::China => "china",
     }
 }
 
@@ -451,11 +467,15 @@ mod tests {
         assert!(parse_words("--gui --no-gui").is_err());
         assert!(parse_words("repair").is_err());
         assert!(parse_words("status --self-update").is_err());
+        assert!(parse_words("status --route china").is_err());
+        assert!(parse_words("uninstall --route china").is_err());
         assert!(parse_words("--self-update --no-self-update").is_err());
-        let Ok(Command::Update(options)) = parse_words("update --no-self-update") else {
+        let Ok(Command::Update(options)) = parse_words("update --no-self-update --route=china")
+        else {
             panic!("update expected");
         };
         assert_eq!(options.self_update, SelfUpdate::Never);
+        assert_eq!(options.route, Some(Route::China));
         assert_eq!(
             parse_words("uninstall --purge --yes"),
             Ok(Command::Uninstall(UninstallOptions {
@@ -463,6 +483,7 @@ mod tests {
                     yes: true,
                     prefix: None,
                     self_update: SelfUpdate::Always,
+                    route: None,
                 },
                 purge: true
             }))

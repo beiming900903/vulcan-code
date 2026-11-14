@@ -36,8 +36,8 @@ case "$(uname -s)" in
     *) fail "unsupported operating system $(uname -s); on Windows use install.ps1" ;;
 esac
 
-# Locate the same root as paths::default_root and the --prefix option in args::parse.
-# 按 paths::default_root 和 args::parse 的 --prefix 选项定位安装目录。
+# Locate the same root as paths::default_root and read the route used for a fresh download.
+# 按 paths::default_root 定位安装目录，并读取首次下载安装器时使用的线路。
 Root=
 case "$Os:${XDG_DATA_HOME:-}" in
     linux:/*) Root="$XDG_DATA_HOME/vulcan-code" ;;
@@ -49,18 +49,32 @@ case "${1:-install}" in
     *) AutoUpdate=0 ;;
 esac
 ValueFor=
+# An unset route uses the published order for the bootstrap download.
+# 未指定线路时，按发布时定义的顺序下载安装器。
+Route=auto
 for Arg do
     if [ -n "$ValueFor" ]; then
-        if [ "$ValueFor" = --prefix ]; then Root="$Arg"; fi
+        case "$ValueFor" in
+            --prefix) Root="$Arg" ;;
+            --route) Route="$Arg" ;;
+        esac
         ValueFor=
         continue
     fi
     case "$Arg" in
         --prefix=*) Root=${Arg#--prefix=} ;;
+        --route=*) Route=${Arg#--route=} ;;
         --prefix|--mode|--port-range|--with|--channel|--route) ValueFor="$Arg" ;;
         --self-update|--no-self-update) AutoUpdate=0 ;;
     esac
 done
+if [ "$ValueFor" = --route ]; then fail '--route needs a value'; fi
+case "$Route" in
+    auto) ;;
+    international) Origins=${Origins%% *} ;;
+    china) Origins=${Origins#* } ;;
+    *) fail '--route accepts auto, international or china' ;;
+esac
 if [ -n "$Root" ] && [ -z "$ValueFor" ]; then
     Program="$Root/setup/vulcan-code-setup"
     if [ ! -L "$Root" ] && [ ! -L "$Root/setup" ] && [ -f "$Root/setup/installation.json" ] &&
@@ -127,7 +141,9 @@ for Origin in $Origins; do
         Fetched=1
         break
     fi
-    printf 'vulcan-code install: cannot download from %s, trying the next origin\n' "$Origin" >&2
+    if [ "$Route" = auto ]; then
+        printf 'vulcan-code install: cannot download from %s, trying the next origin\n' "$Origin" >&2
+    fi
 done
 [ "$Fetched" = 1 ] || fail "cannot download $File"
 Actual=$(sha256_of "$Program")

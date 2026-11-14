@@ -201,6 +201,7 @@ mod tests {
             "terminal",
             "--prefix",
             "--self-update",
+            "--route=china",
         ]
         .into_iter()
         .map(String::from)
@@ -213,9 +214,17 @@ mod tests {
                 "terminal",
                 "--prefix",
                 "--self-update",
+                "--route=china",
                 NO_SELF_UPDATE
             ]
         );
-        assert!(crate::args::parse(&restart_arguments(&arguments)).is_ok());
+        // The replacement installer uses the chosen route without reopening the selection page.
+        // 替换后的安装器沿用选定线路，无需再次打开选择页。
+        let Ok(crate::args::Command::Install(options)) =
+            crate::args::parse(&restart_arguments(&arguments))
+        else {
+            panic!("install expected");
+        };
+        assert_eq!(options.common.route, Some(Route::China));
     }
 }

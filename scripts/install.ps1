@@ -75,15 +75,27 @@
     $Root = if ($LocalData) { Join-Path $LocalData 'Programs\VulcanCode' }
     $AutoUpdate = $args.Count -eq 0 -or $args[0] -cin @('install', 'update') -or $args[0] -clike '-*'
     $ValueFor = $null
+    # An omitted route uses the published order for the bootstrap download.
+    # The installer also receives the original arguments and uses its recorded route when omitted.
+    $Route = 'auto'
     foreach ($Arg in $args) {
         if ($ValueFor) {
             if ($ValueFor -ceq '--prefix') { $Root = $Arg }
+            if ($ValueFor -ceq '--route') { $Route = $Arg }
             $ValueFor = $null
             continue
         }
         if ($Arg -clike '--prefix=*') { $Root = $Arg.Substring('--prefix='.Length) }
+        if ($Arg -clike '--route=*') { $Route = $Arg.Substring('--route='.Length) }
         if ($Arg -cin @('--prefix', '--mode', '--port-range', '--with', '--channel', '--route')) { $ValueFor = $Arg }
         if ($Arg -cin @('--self-update', '--no-self-update')) { $AutoUpdate = $false }
+    }
+    if ($ValueFor -ceq '--route') { throw '--route needs a value' }
+    switch -CaseSensitive ($Route) {
+        'auto' {}
+        'international' { $Origins = @($Origins[0]) }
+        'china' { $Origins = @($Origins[1]) }
+        default { throw '--route accepts auto, international or china' }
     }
     $Program = $null
     if ($Root -and -not $ValueFor) {
@@ -126,7 +138,11 @@
                     if (-not [Console]::IsOutputRedirected) { Write-Host '' }
                     $Reason = $_.Exception
                     while ($Reason.InnerException) { $Reason = $Reason.InnerException }
-                    Write-Warning "Cannot download from $Origin ($($Reason.Message)), trying the next origin"
+                    if ($Route -ceq 'auto') {
+                        Write-Warning "Cannot download from $Origin ($($Reason.Message)), trying the next origin"
+                    } else {
+                        Write-Warning "Cannot download from $Origin ($($Reason.Message))"
+                    }
                 }
             }
             if (-not $Fetched) { throw "Cannot download $File" }

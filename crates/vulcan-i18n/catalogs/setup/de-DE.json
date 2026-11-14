@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "Downloadquelle",
+  "setup.route.auto": "Automatisch",
+  "setup.route.autoDetail": "Zuerst die internationale Quelle, bei Nichterreichbarkeit den Spiegel in Festlandchina verwenden.",
+  "setup.route.international": "International",
+  "setup.route.internationalDetail": "Nur {domain} verwenden.",
+  "setup.route.china": "Festlandchina",
+  "setup.route.chinaDetail": "Nur {domain} verwenden.",
+  "setup.route.hint": "↑↓ Wählen · Enter Weiter · Esc Abbrechen",
   "setup.title": "Vulcan Code einrichten",
   "setup.step": "Schritt {current} von {total}",
   "setup.hint.choose": "↑↓ Wählen · Enter Weiter · Esc Zurück · Q Beenden",

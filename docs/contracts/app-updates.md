@@ -128,11 +128,19 @@
 - **入口脚本**：两个脚本先从平台默认目录或 `--prefix` 查找由独立安装器管理的现有安装，找到时直接运行其安装器。
   对未明确选择自更新行为的 `install` 或 `update` 传入 `--self-update`，使旧安装器也能自动升级。首次安装或
   本地安装器缺失时，按 `scripts/entry-scripts.mjs` 填入的下载源（`AUTO_ORIGINS`）、摘要与 Windows 签名证书指纹
-  下载并校验。Windows 的 `irm | iex` 在安装器成功后将持久用户 PATH 合入当前会话；类 Unix 的 `curl | sh`
+  下载并校验。首次下载时 `--route china` 只用中国大陆镜像，`--route international` 只用国际源，
+  `--route auto` 或省略参数时先国际源再中国镜像。从镜像获取脚本后，可用
+  `curl -fsSL https://static.openvulcan.cn/vulcancode/install.sh | sh -s -- --route china`
+  或 `& ([scriptblock]::Create((irm https://static.openvulcan.cn/vulcancode/install.ps1))) --route china`
+  让入口脚本和安装器都只走国内源。两个节点提供内容相同的签名脚本。
+  Windows 的 `irm | iex` 在安装器成功后将持久用户 PATH 合入当前会话；类 Unix 的 `curl | sh`
   在子 Shell 执行，当前终端继承的 PATH 不会变动。 `promote-setup.yml` 把
   stable 安装器指针所列的脚本按摘要校验后放到主下载源顶层（缓存 60 秒）；openvulcan-web 把 `setup/` 与顶层
   脚本同步到中国镜像。
-- **自更新**：`install`、`update` 之前读取所选通道（preview 同时读 stable）的已签名安装器指针，与自身版本比较。
+- **线路选择与自更新**：交互式 `install`、`update` 在访问网络前先选择自动、国际或中国大陆节点，默认高亮
+  该安装目录已保存的线路或自动。显式 `--route` 跳过选择页。无人值守沿用显式参数、已保存线路或自动。
+  同一线路用于安装器自更新、产品清单及组件下载，保存至安装器的安装记录，并在自动重启时传递给新进程。
+  安装器读取通道（preview 同时读 stable）的已签名安装器指针，与自身版本比较。
   有新版本时自动下载、校验、替换并重启，无需确认。显式 `--no-self-update` 跳过。替换后保留原安装参数并用
   `--no-self-update` 防止重复检查。组装前仍按所装版本的 `minSetupVersion` 检查，不满足即停止。
 - **Inno 安装包**：产品发布在构建前下载 stable 安装器指针与 Windows 程序，经 `vulcan-release-tool setup-check`

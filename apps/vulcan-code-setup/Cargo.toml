@@ -4,7 +4,7 @@ description = "Setup program that installs, updates, modifies and removes a per-
 # The setup program is released apart from the product (`release-setup.yml`) and keeps its own
 # version here; only a change to the setup program itself raises it.
 # 安装器独立于产品发布（`release-setup.yml`），其版本只在此处定义；只有安装器本身变化时才递增。
-version = "0.2.12"
+version = "0.2.13"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

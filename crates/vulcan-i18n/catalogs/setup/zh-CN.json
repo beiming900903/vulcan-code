@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "下载节点",
+  "setup.route.auto": "自动",
+  "setup.route.autoDetail": "优先使用国际源，无法访问时改用中国大陆镜像。",
+  "setup.route.international": "国际节点",
+  "setup.route.internationalDetail": "仅使用 {domain}。",
+  "setup.route.china": "中国大陆节点",
+  "setup.route.chinaDetail": "仅使用 {domain}。",
+  "setup.route.hint": "↑↓ 选择 · Enter 继续 · Esc 取消",
   "setup.title": "Vulcan Code 安装程序",
   "setup.step": "第 {current} 步，共 {total} 步",
   "setup.hint.choose": "↑↓ 选择 · Enter 继续 · Esc 返回 · Q 退出",

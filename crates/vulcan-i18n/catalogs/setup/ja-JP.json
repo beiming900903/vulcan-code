@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "ダウンロード元",
+  "setup.route.auto": "自動",
+  "setup.route.autoDetail": "国際配信元を優先し、利用できない場合は中国本土のミラーを使用します。",
+  "setup.route.international": "国際",
+  "setup.route.internationalDetail": "{domain} のみを使用します。",
+  "setup.route.china": "中国本土",
+  "setup.route.chinaDetail": "{domain} のみを使用します。",
+  "setup.route.hint": "↑↓ 選択 · Enter 次へ · Esc キャンセル",
   "setup.title": "Vulcan Code セットアップ",
   "setup.step": "ステップ {current} / {total}",
   "setup.hint.choose": "↑↓ 選択 · Enter 次へ · Esc 戻る · Q 終了",

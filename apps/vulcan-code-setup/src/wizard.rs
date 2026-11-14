@@ -10,6 +10,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use vulcan_i18n::{Translator, format_template};
+use vulcan_install_core::fetch::Route;
 use vulcan_install_core::names::{Channel, Platform};
 
 use crate::args::check_port_range;
@@ -49,6 +50,9 @@ pub struct Draft {
     /// Release channel.
     /// 发布通道。
     pub channel: Channel,
+    /// Download route selected before the installer checks for updates.
+    /// 安装器检查更新前选定的下载线路。
+    pub route: Route,
     /// Port range as typed; empty keeps the current setting.
     /// 输入的端口范围；为空时保持当前设置。
     pub port_range: String,
@@ -87,6 +91,18 @@ const STEPS: [Step; 6] = [
     Step::Channel,
     Step::Advanced,
     Step::Summary,
+];
+
+/// The routes and the catalog keys for their radio buttons, in display order.
+/// 各下载线路及其单选项文案键，按显示顺序排列。
+const ROUTES: [(Route, &str, &str); 3] = [
+    (Route::Auto, "setup.route.auto", "setup.route.autoDetail"),
+    (
+        Route::International,
+        "setup.route.international",
+        "setup.route.internationalDetail",
+    ),
+    (Route::China, "setup.route.china", "setup.route.chinaDetail"),
 ];
 
 /// One toggle of the components and integration screens.
@@ -468,15 +484,23 @@ fn render(frame: &mut Frame<'_>, wizard: &Wizard, translator: &Translator) {
     let mut lines = match step {
         Step::Components | Step::Integration => {
             let toggles = wizard.toggles();
-            let options: Vec<_> = toggles.iter().map(|toggle| toggle.keys()).collect();
+            // Resolve the detail here so the same renderer accepts descriptions with arguments.
+            // 在此翻译说明，让同一渲染器也能接收带参数的说明。
+            let options: Vec<_> = toggles
+                .iter()
+                .map(|toggle| {
+                    let (label, detail) = toggle.keys();
+                    (label, t(detail))
+                })
+                .collect();
             let states: Vec<bool> = toggles.iter().map(|toggle| wizard.state(*toggle)).collect();
             choice_lines(translator, &options, wizard.row, Some(&states))
         }
         Step::Channel => choice_lines(
             translator,
             &[
-                ("setup.channel.stable", "setup.channel.stableDetail"),
-                ("setup.channel.preview", "setup.channel.previewDetail"),
+                ("setup.channel.stable", t("setup.channel.stableDetail")),
+                ("setup.channel.preview", t("setup.channel.previewDetail")),
             ],
             wizard.row,
             None,
@@ -542,12 +566,74 @@ fn choice_lines<'a>(
             Span::styled(text(translator, label), style),
         ]));
         lines.push(Line::styled(
-            format!("      {}", text(translator, detail)),
+            format!("      {detail}"),
             Style::default().fg(MUTED),
         ));
         lines.push(Line::default());
     }
     lines
+}
+
+/// Opens the selection page with `initial` highlighted and returns the chosen route or cancellation.
+/// 打开线路选择页，默认高亮 `initial`，返回选中的线路或取消结果。
+pub fn choose_route(initial: Route) -> Result<Route, String> {
+    // Keep the highlighted row aligned with the route used if Enter is pressed immediately.
+    // 让高亮行与直接按 Enter 时采用的线路一致。
+    let mut row = ROUTES
+        .iter()
+        .position(|(route, ..)| *route == initial)
+        .expect("every download route has a radio button");
+    // Reuse the installation screen and return the terminal before the self-update can restart.
+    // 复用安装器界面，并在安装器可能自更新重启前归还终端。
+    let mut screen = Screen::open()?;
+    loop {
+        screen.draw(|frame, translator| render_routes(frame, translator, row))?;
+        // Ignore non-key events and key release events, as the main wizard does.
+        // 与主向导一样，忽略非按键事件和按键释放事件。
+        let key = match event::read() {
+            Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => key,
+            Ok(_) => continue,
+            Err(error) => return Err(format!("cannot read the keyboard: {error}")),
+        };
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => row = (row + ROUTES.len() - 1) % ROUTES.len(),
+            KeyCode::Down | KeyCode::Char('j') => row = (row + 1) % ROUTES.len(),
+            KeyCode::Enter => return Ok(ROUTES[row].0),
+            KeyCode::Esc | KeyCode::Char('q') => return Err(String::from(crate::CANCELLED)),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Err(String::from(crate::CANCELLED));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Draws the route page with row `row` selected and URLs from the downloader's route table.
+/// 绘制下载线路页，高亮第 `row` 行，网址来自下载器的线路表。
+fn render_routes(frame: &mut Frame<'_>, translator: &Translator, row: usize) {
+    // Auto has two origins; an explicit node uses its single configured origin.
+    // 自动线路有两个来源，显式节点使用其唯一配置的来源。
+    let details = ROUTES.map(|(route, _, detail)| {
+        if route == Route::Auto {
+            text(translator, detail).to_owned()
+        } else {
+            format_template(text(translator, detail), &[("domain", &route.origins()[0])])
+        }
+    });
+    // Borrow the translated descriptions for this frame.
+    // 在本帧借用翻译后的说明。
+    let options = std::array::from_fn::<_, { ROUTES.len() }, _>(|index| {
+        (ROUTES[index].1, details[index].as_str())
+    });
+    page(
+        frame,
+        translator,
+        "",
+        text(translator, "setup.route.title"),
+        choice_lines(translator, &options, row, None),
+        text(translator, "setup.route.hint"),
+        0,
+    );
 }
 
 /// Lines of a text input, with the cursor shown as a reversed cell.
@@ -587,6 +673,12 @@ fn summary_lines<'a>(translator: &'a Translator, wizard: &Wizard) -> Vec<Line<'a
         Channel::Stable => t("setup.channel.stable"),
         Channel::Preview => t("setup.channel.preview"),
     };
+    // Display the selected route beside the release channel in the review.
+    // 在确认页的发布通道旁显示选中的下载线路。
+    let (_, route, _) = ROUTES
+        .iter()
+        .find(|(route, ..)| *route == draft.route)
+        .expect("every download route has a radio button");
     let ports = match draft.port_range.trim() {
         "" => t("setup.summary.portsKeep").to_owned(),
         range => range.to_owned(),
@@ -597,6 +689,7 @@ fn summary_lines<'a>(translator: &'a Translator, wizard: &Wizard) -> Vec<Line<'a
         (t("setup.summary.components"), components.join(", ")),
         (t("setup.summary.directory"), root.display().to_string()),
         (t("setup.summary.channel"), channel.to_owned()),
+        (t("setup.route.title"), t(route).to_owned()),
         (t("setup.summary.ports"), ports),
     ]);
     lines.push(Line::default());
@@ -670,6 +763,7 @@ mod tests {
             service: false,
             linger: false,
             channel: Channel::Stable,
+            route: Route::Auto,
             port_range: String::new(),
         }
     }
@@ -795,6 +889,23 @@ mod tests {
                 start.desktop_shortcut = true;
                 let mut wizard = Wizard::new(platform(name), true, start);
                 let mut terminal = Terminal::new(TestBackend::new(60, 40)).expect("terminal");
+                // Render the standalone route chooser as well as the numbered wizard pages.
+                // 除带编号的向导页外，也渲染独立的下载线路选择页。
+                terminal
+                    .draw(|frame| render_routes(frame, &translator, 0))
+                    .expect("draw routes");
+                // Read the rendered cells to ensure both origins and formatted catalog text are visible.
+                // 读取渲染单元，验证两个来源及替换后的目录文案都已显示。
+                let routes: String = terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(!routes.contains("setup.") && !routes.contains("{domain}"));
+                assert!(routes.contains(vulcan_install_core::layout::PRIMARY_ORIGIN));
+                assert!(routes.contains(vulcan_install_core::layout::CHINA_ORIGIN));
                 for _ in 0..STEPS.len() {
                     terminal
                         .draw(|frame| render(frame, &wizard, &translator))

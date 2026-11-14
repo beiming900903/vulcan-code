@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "Origem do download",
+  "setup.route.auto": "Automática",
+  "setup.route.autoDetail": "Tentar primeiro a origem internacional e usar o espelho da China continental se ela estiver indisponível.",
+  "setup.route.international": "Internacional",
+  "setup.route.internationalDetail": "Usar apenas {domain}.",
+  "setup.route.china": "China continental",
+  "setup.route.chinaDetail": "Usar apenas {domain}.",
+  "setup.route.hint": "↑↓ Escolher · Enter Continuar · Esc Cancelar",
   "setup.title": "Instalação do Vulcan Code",
   "setup.step": "Etapa {current} de {total}",
   "setup.hint.choose": "↑↓ Escolher · Enter Continuar · Esc Voltar · Q Sair",

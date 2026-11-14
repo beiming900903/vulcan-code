@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "다운로드 소스",
+  "setup.route.auto": "자동",
+  "setup.route.autoDetail": "국제 소스를 먼저 시도하고 사용할 수 없으면 중국 본토 미러를 이용합니다.",
+  "setup.route.international": "국제",
+  "setup.route.internationalDetail": "{domain}만 사용합니다.",
+  "setup.route.china": "중국 본토",
+  "setup.route.chinaDetail": "{domain}만 사용합니다.",
+  "setup.route.hint": "↑↓ 선택 · Enter 계속 · Esc 취소",
   "setup.title": "Vulcan Code 설치",
   "setup.step": "{total}단계 중 {current}단계",
   "setup.hint.choose": "↑↓ 선택 · Enter 계속 · Esc 뒤로 · Q 종료",

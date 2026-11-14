@@ -1,4 +1,12 @@
 {
+  "setup.route.title": "Download source",
+  "setup.route.auto": "Auto",
+  "setup.route.autoDetail": "Try the international source first, then the mainland China mirror if unavailable.",
+  "setup.route.international": "International",
+  "setup.route.internationalDetail": "Use only {domain}.",
+  "setup.route.china": "Mainland China",
+  "setup.route.chinaDetail": "Use only {domain}.",
+  "setup.route.hint": "↑↓ Choose · Enter Continue · Esc Cancel",
   "setup.title": "Vulcan Code Setup",
   "setup.step": "Step {current} of {total}",
   "setup.hint.choose": "↑↓ Choose · Enter Continue · Esc Back · Q Quit",

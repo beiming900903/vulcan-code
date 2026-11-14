@@ -23,7 +23,8 @@ mod uninstall;
 mod windows;
 mod wizard;
 
-use args::{Command, InstallOptions, USAGE};
+use args::{Command, USAGE};
+use vulcan_install_core::names::{Channel, Platform};
 
 /// The error a command returns when the user declines to continue or leaves the wizard; nothing was
 /// changed, so it is reported as a cancellation, not as a failure.
@@ -34,32 +35,29 @@ pub(crate) const CANCELLED: &str = "cancelled";
 /// recognizes it and ends quietly instead of reporting a failure.
 /// 被取消命令的退出码，与 shell 报告被中断程序的方式相同。scripts/install.ps1 识别它并安静结束，而不是报告失败。
 pub const CANCELLED_EXIT_CODE: i32 = 130;
-use vulcan_install_core::names::Platform;
 
 /// Runs the setup program with the arguments after the program name; returns the exit code.
 /// 以程序名之后的参数运行安装器；返回退出码。
 pub fn run(arguments: &[String]) -> i32 {
-    let command = match args::parse(arguments) {
+    let mut command = match args::parse(arguments) {
         Ok(command) => command,
         Err(error) => {
             eprintln!("vulcan-code-setup: {error}\n\n{USAGE}");
             return 2;
         }
     };
-    // A newer setup program runs `install` and `update` in place of this one.
-    // 更新的安装器代替本程序执行 `install` 与 `update`。
-    let updating = match &command {
-        Command::Install(options) => Some(options.clone()),
-        Command::Update(common) => Some(InstallOptions {
-            common: common.clone(),
-            ..InstallOptions::default()
-        }),
+    // Resolve the node before the first network request, even when a newer installer takes over.
+    // 在首次联网前确定节点，即使稍后由新版安装器接管也沿用该节点。
+    let updating = match &mut command {
+        Command::Install(options) => Some((&mut options.common, options.channel)),
+        Command::Update(common) => Some((common, None)),
         _ => None,
     };
-    if let Some(options) = updating {
-        match self_update(&options, arguments) {
+    if let Some((common, channel)) = updating {
+        match prepare(common, channel, arguments) {
             Ok(selfupdate::Outcome::Continue) => {}
             Ok(selfupdate::Outcome::Finished(code)) => return code,
+            Err(error) if error == CANCELLED => return cancelled(),
             Err(error) => {
                 eprintln!("vulcan-code-setup: {error}");
                 return 1;
@@ -82,10 +80,7 @@ pub fn run(arguments: &[String]) -> i32 {
     };
     match result {
         Ok(()) => 0,
-        Err(error) if error == CANCELLED => {
-            println!("Cancelled; nothing was changed.");
-            CANCELLED_EXIT_CODE
-        }
+        Err(error) if error == CANCELLED => cancelled(),
         Err(error) => {
             eprintln!("vulcan-code-setup: {error}");
             1
@@ -93,19 +88,42 @@ pub fn run(arguments: &[String]) -> i32 {
     }
 }
 
-/// Looks for a newer setup program on the channel `install` or `update` will use.
-/// 在 `install` 或 `update` 将使用的通道上查找更新的安装器。
-fn self_update(
-    options: &InstallOptions,
+/// Selects a route for `common` before HTTPS, then checks for a newer installer on `channel`.
+/// 在 HTTPS 请求前为 `common` 选定线路，再按 `channel` 检查新版安装器。
+fn prepare(
+    common: &mut args::CommonOptions,
+    channel: Option<Channel>,
     arguments: &[String],
 ) -> Result<selfupdate::Outcome, String> {
     let platform = Platform::current().ok_or("this platform is not supported")?;
-    let (channel, route) = install::preferences(options, platform);
+    let (channel, initial_route) = install::preferences(common, channel, platform);
+    // Pass an interactive choice through a self-update restart without asking twice.
+    // 将交互选择传给自更新后重启的进程，避免重复询问。
+    let mut next_arguments = arguments.to_vec();
+    // Unattended runs use the resolved route; interactive runs can change the highlighted choice.
+    // 无人值守使用已解析线路；交互运行可修改高亮选择。
+    let route = if common.route.is_none() && wizard::wanted(common.yes) {
+        // This selection was absent from the original arguments.
+        // 原命令行参数中没有这次选择。
+        let route = wizard::choose_route(initial_route)?;
+        next_arguments.push(format!("--route={}", args::route_name(route)));
+        route
+    } else {
+        initial_route
+    };
+    common.route = Some(route);
     selfupdate::check(
         platform,
         channel,
         route,
-        options.common.self_update,
-        arguments,
+        common.self_update,
+        &next_arguments,
     )
+}
+
+/// Prints the cancellation outcome and returns the exit code understood by the entry scripts.
+/// 输出取消结果并返回入口脚本识别的退出码。
+fn cancelled() -> i32 {
+    println!("Cancelled; nothing was changed.");
+    CANCELLED_EXIT_CODE
 }

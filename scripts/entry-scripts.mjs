@@ -82,7 +82,11 @@ function checkOrigin(origin) {
 // install.ps1 要求的证书 SHA-1 指纹，未签名的测试构建为 null。
 export async function generateEntryScripts({ version, setups, origins, signer, out }) {
   if (!releaseVersionPattern.test(version)) throw new Error(`Invalid release version: ${version}.`);
-  if (!Array.isArray(origins) || origins.length === 0) throw new Error('At least one download origin is needed.');
+  // The release tool lists AUTO_ORIGINS in international, then mainland China order.
+  // 发布工具按国际源、中国大陆镜像的顺序列出 AUTO_ORIGINS。
+  if (!Array.isArray(origins) || origins.length !== 2 || origins[0] === origins[1]) {
+    throw new Error('Expected two distinct download origins in international, then China order.');
+  }
   origins.forEach(checkOrigin);
   if (signer !== null && !/^[0-9A-Fa-f]{40}$/.test(signer ?? '')) {
     throw new Error(`The signer must be a SHA-1 certificate thumbprint: ${signer}.`);
@@ -123,7 +127,7 @@ export async function generateEntryScripts({ version, setups, origins, signer, o
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, ...rest] = process.argv.slice(2);
-  const usage = 'Usage: node scripts/entry-scripts.mjs generate --version V --setups DIR --origin URL [--origin URL]... '
+  const usage = 'Usage: node scripts/entry-scripts.mjs generate --version V --setups DIR --origin INTERNATIONAL --origin CHINA '
     + '(--signer SHA1 | --unsigned) --out DIR';
   const options = { origins: [] };
   for (let index = 0; index < rest.length; index += 1) {

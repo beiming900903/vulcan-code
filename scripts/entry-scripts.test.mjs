@@ -50,13 +50,14 @@ test('templates and values must match exactly', () => {
 test('generation needs every platform, a valid signer and plain origins', () => withRoot(async root => {
   const setups = await writeSetups(root, async platform => platform);
   const out = path.join(root, 'out');
-  const base = { version, setups, origins: ['https://example.test/vc'], signer: null, out };
+  const base = { version, setups, origins: ['https://primary.example.test/vc', 'https://china.example.test/vc'], signer: null, out };
   const written = await generateEntryScripts(base);
   assert.deepEqual(written.map(file => path.basename(file)), [...entryScripts]);
   for (const file of written) assert.doesNotMatch(await readFile(file, 'utf8'), /@@/);
   await assert.rejects(generateEntryScripts({ ...base, signer: 'not-a-thumbprint' }), /thumbprint/);
-  await assert.rejects(generateEntryScripts({ ...base, origins: ["https://x.test/'"] }), /origin/);
-  await assert.rejects(generateEntryScripts({ ...base, origins: ['https://x.test/'] }), /origin/);
+  await assert.rejects(generateEntryScripts({ ...base, origins: [base.origins[0], "https://x.test/'"] }), /Invalid download origin/);
+  await assert.rejects(generateEntryScripts({ ...base, origins: [base.origins[0], 'https://x.test/'] }), /Invalid download origin/);
+  await assert.rejects(generateEntryScripts({ ...base, origins: [base.origins[0]] }), /two distinct download origins/);
   await rm(path.join(setups, setupProgramName(version, 'macos-arm64')));
   await assert.rejects(generateEntryScripts(base), /ENOENT/);
 }));
@@ -89,6 +90,16 @@ test('install.sh picks the platform, falls back between origins, verifies and pa
   assert.equal(linux.status, 7, linux.stderr);
   assert.equal(linux.stdout.trim(), 'linux-arm64 --mode terminal --yes');
   assert.match(linux.stderr, /trying the next origin/);
+  // Selecting China skips an unreachable primary; selecting international does not fall back.
+  // 选择中国大陆节点时跳过不可达的主源；选择国际节点时不回退。
+  const china = run({ FAKE_OS: 'Linux', FAKE_MACHINE: 'aarch64' }, ['--route', 'china', '--yes']);
+  assert.equal(china.status, 7, china.stderr);
+  assert.match(china.stdout, /--route china/);
+  assert.doesNotMatch(china.stderr, /\/missing\/|trying the next origin/);
+  const international = run({ FAKE_OS: 'Linux', FAKE_MACHINE: 'aarch64' }, ['--route=international']);
+  assert.equal(international.status, 1, international.stderr);
+  assert.doesNotMatch(international.stdout, /linux-arm64/);
+  assert.doesNotMatch(international.stderr, /trying the next origin/);
   const rosetta = run({ FAKE_OS: 'Darwin', FAKE_MACHINE: 'x86_64', FAKE_TRANSLATED: '1' }, []);
   assert.equal(rosetta.stdout.trim(), 'macos-arm64');
   assert.equal(run({ FAKE_OS: 'Darwin', FAKE_MACHINE: 'x86_64' }, []).stdout.trim(), 'macos-x64');
@@ -180,6 +191,15 @@ test('install.ps1 verifies the setup program and passes its arguments and exit c
       assert.equal(passed.status, 0, `${shell}: ${passed.stderr}`);
       assert.match(passed.stdout, /hello/);
       assert.match(passed.stdout + passed.stderr, /trying the next origin/);
+      // The China route downloads directly from the mirror and is forwarded to the installer.
+      // 中国大陆线路直接从镜像下载，并将选项透传给安装器。
+      const china = await run(unsigned, '/d', '/c', 'echo', 'hello', freshPrefix, '--route=china');
+      assert.equal(china.status, 0, `${shell}: ${china.stderr}`);
+      assert.match(china.stdout, /--route=china/);
+      assert.doesNotMatch(china.stdout + china.stderr, /\/missing|trying the next origin/);
+      const international = await run(unsigned, '/d', '/c', 'echo', 'hello', freshPrefix, '--route', 'international');
+      assert.notEqual(international.status, 0, shell);
+      assert.doesNotMatch(international.stdout + international.stderr, /trying the next origin/);
       const failed = await run(unsigned, '/d', '/c', 'exit /b 5', '&', 'rem', freshPrefix);
       assert.notEqual(failed.status, 0, shell);
       assert.match(failed.stderr + failed.stdout, /exited with 5/);
