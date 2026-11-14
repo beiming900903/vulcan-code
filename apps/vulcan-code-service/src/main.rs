@@ -16,6 +16,8 @@ mod desktop_notifications;
 mod inherited_descriptors;
 mod launch;
 mod logging;
+#[allow(unsafe_code)]
+mod lua_environment;
 mod managed_runtimes;
 mod native_diagnostics;
 mod restart;
@@ -38,6 +40,7 @@ fn main() {
     // 从桌面客户端继承的描述符在其他任何内容打开描述符之前关闭。
     #[cfg(unix)]
     inherited_descriptors::close();
+    lua_environment::isolate_at_entry();
     // Install the crypto provider before the tray or background service constructs any TLS client.
     // 在托盘或后台服务构造任何 TLS 客户端之前安装加密实现。
     vulcan_provider_adapters::install_process_rustls_crypto_provider()

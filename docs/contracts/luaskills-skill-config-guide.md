@@ -21,6 +21,10 @@
 运行时根属于只读发行树：`build_host_options` 把 `temp_dir` 与 `download_cache_root` 设为用户缓存下的
 `cache/luaskills/temp` 与 `cache/luaskills/downloads`，并设置 `preserve_host_writable_dirs = true`
 （LuaSkills 0.9 起），因此 LuaSkills 不再在运行时根下创建 `temp`；`temp_dir` 由宿主创建，下载缓存由引擎创建。
+Core 在创建线程和 Lua VM 前移除继承的 `LUA_PATH`、`LUA_CPATH`、`LUA_INIT` 及其带版本后缀的形式。
+Windows 同时清理 LuaJIT 读取的 C 运行时环境。该隔离只作用于 Core 进程及其继承环境的子进程。
+LuaJIT 通过 Windows 的 ANSI 接口获取可执行文件目录并展开默认模块路径，Core 的可执行文件清单为进程启用
+UTF-8 代码页（Windows 10 1903 及以上），保证中文等非 ASCII 安装路径能按 UTF-8 进入 LuaSkills。
 `crates/vulcan-service-runtime/managed-runtimes.json` 的 `luaskills_version` 必须与根清单版本一致，
 否则构建脚本拒绝构建。
 

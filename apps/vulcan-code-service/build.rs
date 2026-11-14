@@ -32,6 +32,20 @@ fn main() {
         println!("cargo:rerun-if-changed=lua-native-symbols.txt");
     }
     if target_os == "windows" {
+        // LuaJIT expands executable-relative package paths through GetModuleFileNameA.
+        // Give this process a UTF-8 code page so those bytes match the host's Rust paths.
+        // LuaJIT 通过 GetModuleFileNameA 展开相对于可执行文件的包路径。
+        // 让本进程使用 UTF-8 代码页，使得到的字节与 Rust 宿主路径一致。
+        println!("cargo:rerun-if-changed=windows-utf8.manifest");
+        // Link the manifest into both the desktop and headless service executable.
+        // 将清单嵌入桌面版和无头版服务程序。
+        let manifest =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("windows-utf8.manifest");
+        println!("cargo:rustc-link-arg-bin=vulcan-code-service=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=vulcan-code-service=/MANIFESTINPUT:{}",
+            manifest.display()
+        );
         #[cfg(feature = "desktop-tray")]
         {
             println!("cargo:rerun-if-changed=icons/icon.ico");
