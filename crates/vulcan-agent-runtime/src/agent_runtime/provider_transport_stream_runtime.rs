@@ -1382,6 +1382,7 @@ mod tests {
                 request_budget_guard: None,
                 locked_baseline: LockedBaselineProjection::empty(),
                 dynamic_prompt_layers: vulcan_core::types::ProviderPromptLayers::default(),
+                fixed_instruction_layers: Default::default(),
             },
             completion,
         }

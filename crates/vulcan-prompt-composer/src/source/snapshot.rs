@@ -50,6 +50,9 @@ pub struct AgentPromptSnapshot {
     /// Human-readable source label for diagnostics.
     /// 供诊断使用的人类可读来源标签。
     pub source_label: String,
+    /// Whether this source is an agent definition's or dedicated session's fixed instruction.
+    /// 此来源是否属于代理定义或专职会话的固定指令。
+    pub(crate) fixed_instruction: bool,
 }
 
 impl AgentPromptSnapshot {
@@ -62,6 +65,7 @@ impl AgentPromptSnapshot {
             text,
             fingerprint,
             source_label: String::from("Agent profile system prompt"),
+            fixed_instruction: false,
         }
     }
 
@@ -69,6 +73,13 @@ impl AgentPromptSnapshot {
     /// 为该 Agent 提示词快照附加人类可读来源标签。
     pub fn with_source_label(mut self, source_label: impl Into<String>) -> Self {
         self.source_label = source_label.into();
+        self
+    }
+
+    /// Marks this snapshot as a fixed agent instruction and returns it.
+    /// 将此快照标记为固定代理指令并返回。
+    pub fn with_fixed_instruction(mut self) -> Self {
+        self.fixed_instruction = true;
         self
     }
 }

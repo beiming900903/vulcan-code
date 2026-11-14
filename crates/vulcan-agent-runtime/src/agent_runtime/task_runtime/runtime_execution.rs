@@ -2059,6 +2059,7 @@ mod standalone_compaction_tests {
             request_budget_guard: None,
             locked_baseline: vulcan_session_core::v1::context::LockedBaselineProjection::empty(),
             dynamic_prompt_layers: Default::default(),
+            fixed_instruction_layers: Default::default(),
         }
     }
 
@@ -2487,6 +2488,7 @@ mod standalone_compaction_tests {
             system_preamble: String::new(),
             locked_baseline: vulcan_session_core::v1::context::LockedBaselineProjection::empty(),
             dynamic_prompt_layers: Default::default(),
+            fixed_instruction_layers: Default::default(),
             core_snapshot: Default::default(),
             stream_state,
             lowering_repair_events: Vec::new(),

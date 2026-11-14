@@ -96,6 +96,7 @@ pub(crate) fn execute_vulcan_public_stream(
     let PreparedProviderTransportStreamLaunch {
         runtime_inputs,
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         core_snapshot,
         prompt_intervention,
@@ -121,6 +122,7 @@ pub(crate) fn execute_vulcan_public_stream(
                 workspace_path.clone(),
                 live_sender,
                 dynamic_prompt_layers.clone(),
+                fixed_instruction_layers.clone(),
                 locked_baseline.clone(),
                 std::sync::Arc::clone(&resolved),
             )
@@ -196,6 +198,9 @@ pub(crate) struct VulcanPublicContractAdapter {
     /// Request-dynamic prompt layers emitted by the unique prompt composer.
     /// 由唯一提示词组合器生成的请求动态提示词层。
     dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical typed prompt baseline proposed for V1 request preparation.
     /// 为 V1 请求准备提出的规范强类型提示词基线。
     locked_baseline: LockedBaselineProjection,
@@ -253,6 +258,7 @@ impl VulcanPublicContractAdapter {
         workspace_path: String,
         live_sender: ProviderLiveDeltaSender,
         dynamic_prompt_layers: CoreProviderPromptLayers,
+        fixed_instruction_layers: CoreProviderPromptLayers,
         locked_baseline: LockedBaselineProjection,
         media_execution: std::sync::Arc<ResolvedPublicAiExecution>,
     ) -> Self {
@@ -288,6 +294,7 @@ impl VulcanPublicContractAdapter {
             workspace_path,
             live_sender,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
         }
     }

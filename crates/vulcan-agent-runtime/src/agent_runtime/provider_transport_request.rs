@@ -111,6 +111,9 @@ pub(crate) struct ProviderTransportExecutionRequest {
     /// Request-dynamic prompt layers kept separate from the locked baseline.
     /// 与锁定基线分离保存的请求动态提示词层。
     pub(crate) dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub(crate) fixed_instruction_layers: CoreProviderPromptLayers,
     /// Exact outgoing prompt text for the current controller turn.
     /// 当前控制器回合的精确出站提示词文本。
     pub(crate) prompt: String,
@@ -189,6 +192,7 @@ pub(crate) fn build_provider_transport_execution_request(
     execution_mode: &str,
     system_preamble: &str,
     dynamic_prompt_layers: CoreProviderPromptLayers,
+    fixed_instruction_layers: CoreProviderPromptLayers,
     locked_baseline: LockedBaselineProjection,
     prompt: &str,
     turn_start_mode: ProviderTransportTurnStartMode,
@@ -217,6 +221,7 @@ pub(crate) fn build_provider_transport_execution_request(
         execution_mode: execution_mode.to_string(),
         system_preamble: system_preamble.to_string(),
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         prompt: prompt.to_string(),
         turn_start_mode,

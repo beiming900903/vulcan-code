@@ -37,10 +37,13 @@ pub enum PromptNodeKind {
     ToolMetadata,
 }
 
-/// Stable kind of one mutable prompt baseline that is locked for a context generation.
-/// 为一个上下文代际锁定的可变提示词基线稳定类型。
+/// Producer-declared kind of a stable prompt segment.
+/// 生产者声明的稳定提示词片段类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PromptBaselineKind {
+    /// Fixed instruction resolved at execution launch and rendered at the request head.
+    /// 在执行启动时解析、在请求头部渲染的固定指令。
+    FixedInstruction,
     /// Memory profile baseline.
     /// 记忆画像基线。
     MemoryProfile,
@@ -69,6 +72,7 @@ impl PromptBaselineKind {
     /// 返回当前生产者声明类型的稳定缓存身份标签。
     pub const fn cache_identity(self) -> &'static str {
         match self {
+            Self::FixedInstruction => "fixed-instruction",
             Self::MemoryProfile => "memory-profile",
             Self::AgentsMd => "agents-md",
             Self::AgentPersona => "agent-persona",
@@ -213,8 +217,8 @@ pub struct PromptSegment {
     /// Human-readable source label for diagnostics.
     /// 供诊断使用的人类可读来源标签。
     pub source_label: String,
-    /// Typed locked-baseline provenance, or `None` for request-dynamic content.
-    /// 强类型锁定基线来源；请求动态内容为 `None`。
+    /// Typed stable provenance, or `None` for request-dynamic content.
+    /// 强类型稳定来源；请求动态内容为 `None`。
     pub baseline_provenance: Option<PromptBaselineProvenance>,
     /// Whether the segment came from cache.
     /// 片段是否来自缓存。

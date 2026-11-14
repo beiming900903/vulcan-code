@@ -146,6 +146,7 @@ impl VulcanStreamingProviderAdapter for VulcanPublicContractAdapter {
                     request_budget_guard,
                     locked_baseline: self.locked_baseline.clone(),
                     dynamic_prompt_layers: self.dynamic_prompt_layers.clone(),
+                    fixed_instruction_layers: self.fixed_instruction_layers.clone(),
                 },
                 completion: prepared_completion,
             }))

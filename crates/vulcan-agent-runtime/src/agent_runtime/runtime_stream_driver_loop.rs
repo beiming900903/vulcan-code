@@ -163,6 +163,9 @@ pub(crate) fn drive_runtime_stream_provider_loop(
         let warnings = launch.warnings;
         let system_preamble = launch.system_preamble;
         let dynamic_prompt_layers = launch.dynamic_prompt_layers;
+        // The permit reuses these execution-resolved instructions ahead of the durable baseline.
+        // 许可在持久基线前使用本次执行已解析的固定指令。
+        let fixed_instruction_layers = launch.fixed_instruction_layers;
         let locked_baseline = launch.locked_baseline;
         let core_snapshot = launch.core_snapshot;
         let mut stream_state = launch.stream_state;
@@ -197,6 +200,7 @@ pub(crate) fn drive_runtime_stream_provider_loop(
             active_agent.as_ref(),
             &system_preamble,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             &effective_prompt,
             turn_start_mode,

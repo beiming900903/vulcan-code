@@ -30,8 +30,9 @@ use vulcan_prompt_composer::{
     AdditionalPromptSegment, AgentPromptSnapshot, DEFAULT_PROJECT_RULES_FILE_NAME,
     EnvironmentContextSnapshot, ModelDescriptor, ProjectRulesFileCache, ProjectRulesSnapshot,
     PromptAssemblyInput, PromptAssemblyMode, PromptAssemblyOutput, PromptBaselineKind,
-    PromptSegment, PromptTarget, ProviderPromptSnapshot, SubagentSnapshot, ToolCatalogSnapshot,
-    ToolDescriptor, build_context_compaction_developer_segment,
+    PromptBaselineProvenance, PromptSegment, PromptTarget, ProviderPromptSnapshot,
+    SubagentSnapshot, ToolCatalogSnapshot, ToolDescriptor,
+    build_context_compaction_developer_segment,
 };
 use vulcan_session_core::v1::DedicatedToolAccess;
 use vulcan_session_core::v1::context::{
@@ -104,6 +105,9 @@ pub(crate) struct RuntimePromptLayers {
     /// Request-dynamic prompt layers that are not part of the locked context baseline.
     /// 不属于锁定上下文基线的请求动态提示词层。
     pub(crate) dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions resolved for this execution.
+    /// 本次执行解析出的固定系统和开发者指令。
+    pub(crate) fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical context-generation baseline projected from producer-owned typed provenance.
     /// 根据生产者持有的强类型来源投影出的规范上下文代际基线。
     pub(crate) locked_baseline: LockedBaselineProjection,
@@ -186,6 +190,14 @@ impl RuntimePromptLayers {
         // dynamic_prompt_layers 按生产者持有的来源信息过滤，使许可可以合并请求级指令且不重复锁定基线。
         let dynamic_prompt_layers =
             render_request_dynamic_prompt_layers(output, &preparation.system_prompt_hook_blocks);
+        // Carry product and agent foundations separately so existing V1 sessions can use them
+        // without editing the persisted generation lock or freezing the editable base prompt.
+        // 单独传递产品及代理基础指令，使现有 V1 会话能使用它们，同时保留已持久化的代际锁和基础提示词设置的生效时机。
+        let fixed_instruction_layers = CoreProviderPromptLayers {
+            system: render_fixed_instruction_segments(&output.system_segments),
+            developer: render_fixed_instruction_segments(&output.developer_segments),
+            ..Default::default()
+        };
         // fallback_text contains only the producer-declared stable baseline; dynamic material is emitted as User events by the non-V1 transport.
         // fallback_text 只包含生产者声明的稳定基线；动态内容由非 V1 传输层作为 User 事件发送。
         let stable_provider_layers =
@@ -201,6 +213,7 @@ impl RuntimePromptLayers {
             fallback_text,
             provider_layers,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             host_events,
         })
@@ -661,9 +674,19 @@ fn build_runtime_prompt_assembly_input(
     let agent_prompt = match preparation.dedicated_session.as_ref() {
         Some(profile) => Some(
             AgentPromptSnapshot::new(profile.base_prompt.clone())
-                .with_source_label("Dedicated session base prompt"),
+                .with_source_label("Dedicated session base prompt")
+                .with_fixed_instruction(),
         ),
         None => build_request_agent_prompt_snapshot(preparation)
+            // A child has its own session and inherits the parent's captured base definition.
+            // 子代理有独立会话，并继承已捕获的父代理基础定义。
+            .map(|snapshot| {
+                if preparation.subagent_prompt_context.is_some() {
+                    snapshot.with_fixed_instruction()
+                } else {
+                    snapshot
+                }
+            })
             .or_else(|| active_agent.and_then(build_agent_prompt_snapshot)),
     };
     let environment_context = EnvironmentContextSnapshot::new(format!(
@@ -776,10 +799,14 @@ fn build_prompt_purpose_developer_segments(
         | ExecutionPromptPurpose::ContextCompactionCachePreserving => {
             // Conversational purposes, including cache-preserving compaction, keep one shared prefix.
             // 会话类用途（含保留缓存的压缩）保持同一共享前缀。
-            vec![AdditionalPromptSegment::dynamic(
+            vec![AdditionalPromptSegment::locked(
                 "Product Capability Guide",
                 capability_guide_prompt(),
                 "Built-in product capability guide",
+                PromptBaselineProvenance::new(
+                    PromptBaselineKind::FixedInstruction,
+                    "product-capability-guide",
+                ),
             )]
         }
         ExecutionPromptPurpose::ContextCompaction => vec![AdditionalPromptSegment::dynamic(
@@ -811,10 +838,12 @@ fn build_agent_prompt_snapshot(agent: &RuntimeAgentDefinition) -> Option<AgentPr
         return None;
     }
     Some(
-        AgentPromptSnapshot::new(text.to_string()).with_source_label(format!(
-            "Runtime agent `{}` ({}) system prompt",
-            agent.id, agent.name
-        )),
+        AgentPromptSnapshot::new(text.to_string())
+            .with_source_label(format!(
+                "Runtime agent `{}` ({}) system prompt",
+                agent.id, agent.name
+            ))
+            .with_fixed_instruction(),
     )
 }
 
@@ -898,6 +927,24 @@ fn render_locked_prompt_segments(segments: &[PromptSegment]) -> String {
         .filter(|segment| segment.baseline_provenance.is_some())
         .map(|segment| segment.body.as_str())
         .filter(|body| !body.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Joins fixed instruction bodies in composer order for the V1 request head.
+/// 按组合器顺序拼接固定指令正文，供 V1 请求头部使用。
+/// `segments` contains the ordered segments for one role; returns empty text if none are fixed.
+/// `segments` 包含同一角色的有序片段；没有固定指令时返回空文本。
+fn render_fixed_instruction_segments(segments: &[PromptSegment]) -> String {
+    segments
+        .iter()
+        .filter(|segment| {
+            segment
+                .baseline_provenance
+                .as_ref()
+                .is_some_and(|provenance| provenance.kind == PromptBaselineKind::FixedInstruction)
+        })
+        .map(|segment| segment.body.as_str())
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -1037,6 +1084,7 @@ fn push_locked_prompt_segment(
         }
     };
     let kind = match provenance.kind {
+        PromptBaselineKind::FixedInstruction => return Ok(()),
         PromptBaselineKind::MemoryProfile => LockedSourceKind::MemoryProfile,
         PromptBaselineKind::AgentsMd => LockedSourceKind::AgentsMd,
         PromptBaselineKind::AgentPersona => LockedSourceKind::AgentPersona,
@@ -2185,6 +2233,27 @@ mod tests {
                 .system
                 .contains(built_in_system_prompt())
         );
+        assert_eq!(
+            layers.fixed_instruction_layers.system,
+            "Project base system prompt"
+        );
+        assert!(
+            layers
+                .fallback_text
+                .starts_with("Project base system prompt")
+        );
+        assert!(
+            !layers
+                .dynamic_prompt_layers
+                .system
+                .contains("Project base system prompt")
+        );
+        assert!(
+            layers
+                .host_events
+                .iter()
+                .all(|event| event.body != "Project base system prompt")
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2215,6 +2284,22 @@ mod tests {
                 .provider_layers
                 .system
                 .contains(capability_guide_prompt())
+        );
+        assert_eq!(
+            layers.fixed_instruction_layers.developer,
+            capability_guide_prompt()
+        );
+        assert!(
+            !layers
+                .dynamic_prompt_layers
+                .developer
+                .contains(capability_guide_prompt())
+        );
+        assert!(
+            layers
+                .host_events
+                .iter()
+                .all(|event| event.body != capability_guide_prompt())
         );
 
         let _ = fs::remove_dir_all(root);
@@ -2358,6 +2443,8 @@ mod tests {
             delegation: Some(String::from("Return findings to the parent.")),
             functional_system_prompt: None,
         });
+        preparation.agent_prompt_snapshot =
+            ExecutionAgentPromptSnapshot::fixed_parent_runtime("Inherited agent foundation");
 
         let layers = build_runtime_prompt_layers_for_agent(&preparation, None)
             .expect("runtime prompt layers should build");
@@ -2375,6 +2462,18 @@ mod tests {
                 .contains("Delegated task: Review code")
         );
         assert!(!layers.provider_layers.system.contains("Subagent identity"));
+        assert!(
+            layers
+                .fixed_instruction_layers
+                .system
+                .ends_with("Inherited agent foundation")
+        );
+        assert!(
+            !layers
+                .dynamic_prompt_layers
+                .system
+                .contains("Inherited agent foundation")
+        );
     }
 
     /// Verifies functional child-agent prompts use the functional subagent strategy.

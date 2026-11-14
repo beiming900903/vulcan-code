@@ -609,7 +609,7 @@ fn provider_transport_rebuild_replaces_pre_gate_conversation() {
         LockedBaselineSegmentInput {
             kind: LockedSourceKind::AgentsMd,
             node_id: String::from("persisted-baseline"),
-            target: LockedPromptTarget::Developer,
+            target: LockedPromptTarget::User,
             source_label: None,
             source_id: None,
             content: String::from("persisted-baseline-content"),
@@ -709,6 +709,11 @@ fn provider_transport_rebuild_replaces_pre_gate_conversation() {
             developer: String::from("dynamic-developer"),
             tool_guidance: String::from("dynamic-tool-guidance"),
             runtime_context: String::from("dynamic-runtime-context"),
+        },
+        fixed_instruction_layers: ProviderPromptLayers {
+            system: String::from("fixed-base-system\n\nfixed-agent-system"),
+            developer: String::from("fixed-capability-guide"),
+            ..Default::default()
         },
         locked_baseline: candidate_locked_baseline,
     };
@@ -810,6 +815,42 @@ fn provider_transport_rebuild_replaces_pre_gate_conversation() {
         matches!(&physical_user.content[1], ContentItem::Text { text } if text == "durable-v1-message")
     );
     assert!(serialized.contains("persisted-baseline-content"));
+    assert!(rebuilt.transport.exact_request.messages.starts_with(&[
+        text_ai_message(
+            MessageRole::System,
+            "fixed-base-system\n\nfixed-agent-system".into(),
+        ),
+        text_ai_message(MessageRole::System, HOST_MESSAGE_GUIDANCE.into()),
+        text_ai_message(MessageRole::Developer, "fixed-capability-guide".into()),
+        text_ai_message(MessageRole::User, "persisted-baseline-content".into()),
+    ]));
+    // Verify both an in-band prefix and a protocol with dedicated system instructions.
+    // 同时验证消息内前缀和使用独立系统指令字段的协议。
+    let chat = vulcan_llm_core::ProtocolRegistry::first_batch()
+        .expect("registered protocols")
+        .require(vulcan_llm_core::OPENAI_CHAT_PROFILE_ID)
+        .expect("registered Chat Completions profile")
+        .encode(&rebuilt.transport.exact_request)
+        .expect("encode exact request for Chat Completions");
+    assert_eq!(chat.body["messages"][0]["role"], "system");
+    assert_eq!(
+        chat.body["messages"][0]["content"],
+        "fixed-base-system\n\nfixed-agent-system"
+    );
+    let responses =
+        vulcan_llm_core::encode_codex_responses_request(&rebuilt.transport.exact_request)
+            .expect("encode exact request for Codex Responses");
+    assert!(
+        responses.body["instructions"]
+            .as_str()
+            .unwrap()
+            .starts_with("fixed-base-system\n\nfixed-agent-system")
+    );
+    assert_eq!(responses.body["input"][0]["role"], "developer");
+    assert_eq!(
+        responses.body["input"][0]["content"][0]["text"],
+        "fixed-capability-guide"
+    );
     assert!(!serialized.contains("candidate-baseline-content"));
     assert!(!serialized.contains("legacy-message"));
     assert_eq!(
@@ -3951,12 +3992,18 @@ fn provider_transport_rebuild_keeps_durable_envelope_conservative()
         )),
         locked_baseline: LockedBaselineProjection::empty(),
         dynamic_prompt_layers: ProviderPromptLayers::default(),
+        fixed_instruction_layers: ProviderPromptLayers::default(),
     };
 
     // Exercise summary controls on the same production reconstruction, with an actual durable business inventory.
     // 在相同生产重建路径验证摘要控制，并使用真实持久业务清单。
     let (_directory, handle) = published_stored_open_turn();
     let mut business_candidate = candidate.clone();
+    business_candidate.fixed_instruction_layers = ProviderPromptLayers {
+        system: "business-fixed-base".into(),
+        developer: "business-fixed-guide".into(),
+        ..Default::default()
+    };
     business_candidate.dynamic_prompt_layers.runtime_context =
         String::from("original-business-memory");
     context_injection::synchronize_request_dynamic_context(&handle, &facts, &business_candidate)?;
@@ -3970,6 +4017,8 @@ fn provider_transport_rebuild_keeps_durable_envelope_conservative()
     let mut summary_facts = facts.clone();
     summary_facts.purpose = ApiPurposeKind::Compaction;
     let mut summary_candidate = candidate.clone();
+    summary_candidate.fixed_instruction_layers =
+        business_candidate.fixed_instruction_layers.clone();
     summary_candidate.dynamic_prompt_layers = ProviderPromptLayers {
         system: String::from("local-summary-system"),
         developer: String::from("local-summary-developer"),
@@ -4001,6 +4050,11 @@ fn provider_transport_rebuild_keeps_durable_envelope_conservative()
         },
     )?;
     let serialized = serde_json::to_string(&summary.transport.exact_request.messages).unwrap();
+    assert!(summary.transport.exact_request.messages.starts_with(&[
+        text_ai_message(MessageRole::System, "business-fixed-base".into()),
+        text_ai_message(MessageRole::System, HOST_MESSAGE_GUIDANCE.into()),
+        text_ai_message(MessageRole::Developer, "business-fixed-guide".into()),
+    ]));
     for body in [
         "local-summary-system",
         "local-summary-developer",

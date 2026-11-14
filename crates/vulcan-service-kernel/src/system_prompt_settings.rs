@@ -110,8 +110,8 @@ pub(crate) async fn service_system_prompt_settings(
     build_snapshot(&state, project_id.as_deref())
 }
 
-/// Saves one override; the next provider request resolves it through the dynamic system layer.
-/// 保存一个覆盖；下一次 Provider 请求通过动态系统层解析它。
+/// Saves one override for the next execution's fixed Provider request head.
+/// 保存一个覆盖，供下一次执行解析为固定的 Provider 请求头部指令。
 pub(crate) async fn service_save_system_prompt(
     state: SharedServiceBridgeState,
     request: SystemPromptSaveRequest,

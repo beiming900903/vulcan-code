@@ -64,6 +64,9 @@ pub(crate) struct RuntimeStreamBootstrap {
     /// Request-dynamic prompt layers preserved independently from the locked baseline.
     /// 与锁定基线独立保留的请求动态提示词层。
     pub dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical conversation snapshot handed to `vulcan-core`.
     /// 交给 `vulcan-core` 的规范会话快照。
     pub core_snapshot: CoreConversationSnapshot,
@@ -120,6 +123,7 @@ pub(crate) async fn bootstrap_runtime_stream(
         system_preamble,
         prompt_layers,
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         core_snapshot,
         core_controller,
@@ -172,6 +176,7 @@ pub(crate) async fn bootstrap_runtime_stream(
         warnings,
         system_preamble,
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         core_snapshot,
         core_controller,

@@ -128,14 +128,23 @@ fn initial_locked_baseline_with_host_guidance(
             content: source.content.clone(),
         })
         .collect::<Vec<_>>();
-    segments.push(LockedBaselineSegmentInput {
-        kind: LockedSourceKind::BaselineHooks,
-        node_id: String::from("host-message-guidance"),
-        target: LockedPromptTarget::System,
-        source_label: Some(String::from("host_message_guidance")),
-        source_id: Some(String::from("v1:host_message_guidance")),
-        content: String::from(HOST_MESSAGE_GUIDANCE),
-    });
+    // Group system sources before developer and project context in newly locked generations.
+    // 在新锁定代际中，将系统来源排在开发者指令和项目上下文之前。
+    let system_end = segments
+        .iter()
+        .position(|source| source.target != LockedPromptTarget::System)
+        .unwrap_or(segments.len());
+    segments.insert(
+        system_end,
+        LockedBaselineSegmentInput {
+            kind: LockedSourceKind::BaselineHooks,
+            node_id: String::from("host-message-guidance"),
+            target: LockedPromptTarget::System,
+            source_label: Some(String::from("host_message_guidance")),
+            source_id: Some(String::from("v1:host_message_guidance")),
+            content: String::from(HOST_MESSAGE_GUIDANCE),
+        },
+    );
     LockedBaselineProjection::project(segments).map_err(provider_projection_runtime_error)
 }
 
@@ -1530,13 +1539,12 @@ fn rebuild_provider_transport_candidate_with_compaction(
         &snapshot,
         candidate.controller_config.context_injection.as_ref(),
     )?;
-    for source in candidate.locked_baseline.locked_sources() {
-        let role = locked_prompt_message_role(source)?;
-        if matches!(role, MessageRole::System | MessageRole::Developer) {
-            system_prompt_parts.push(source.content.clone());
-        }
-        request_messages.push(text_ai_message(role, source.content.clone()));
-    }
+    append_provider_request_prefix(
+        &candidate.fixed_instruction_layers,
+        &candidate.locked_baseline,
+        &mut request_messages,
+        &mut system_prompt_parts,
+    )?;
 
     // replay_route is the frozen identity a durable envelope must match before it may replace canonical content.
     // replay_route 是可持久化封套在替代规范内容前必须匹配的冻结身份。
@@ -1800,6 +1808,60 @@ fn validate_prompt_media_preparation_frontier(
         })
     {
         return Err(provider_projection_runtime_error("V1 prompt media preparation frontier does not match chronological source projection"));
+    }
+    Ok(())
+}
+
+/// Appends execution-fixed and locked instructions before project context and history.
+/// 在项目上下文和历史之前追加本次执行固定的指令和锁定指令。
+/// `fixed` comes from the composer and `baseline` from the session lock; both output buffers
+/// follow the physical order. Unsupported locked targets return a projection error.
+/// `fixed` 来自组合器，`baseline` 来自会话锁；两个输出缓冲区遵循实际顺序。
+/// 遇到不支持的锁定目标时返回投影错误。
+fn append_provider_request_prefix(
+    fixed: &ProviderPromptLayers,
+    baseline: &LockedBaselineProjection,
+    messages: &mut Vec<AiMessage>,
+    system_prompt_parts: &mut Vec<String>,
+) -> Result<(), SessionRuntimeError> {
+    for (role, target, fixed_text) in [
+        (
+            MessageRole::System,
+            LockedPromptTarget::System,
+            &fixed.system,
+        ),
+        (
+            MessageRole::Developer,
+            LockedPromptTarget::Developer,
+            &fixed.developer,
+        ),
+    ] {
+        if !fixed_text.is_empty() {
+            system_prompt_parts.push(fixed_text.clone());
+            messages.push(text_ai_message(role, fixed_text.clone()));
+        }
+        for source in baseline
+            .locked_sources()
+            .iter()
+            .filter(|source| source.target == target)
+        {
+            system_prompt_parts.push(source.content.clone());
+            messages.push(text_ai_message(
+                locked_prompt_message_role(source)?,
+                source.content.clone(),
+            ));
+        }
+    }
+    for source in baseline.locked_sources().iter().filter(|source| {
+        !matches!(
+            source.target,
+            LockedPromptTarget::System | LockedPromptTarget::Developer
+        )
+    }) {
+        messages.push(text_ai_message(
+            locked_prompt_message_role(source)?,
+            source.content.clone(),
+        ));
     }
     Ok(())
 }

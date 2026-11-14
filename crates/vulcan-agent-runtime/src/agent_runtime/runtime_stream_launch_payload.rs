@@ -88,6 +88,9 @@ pub struct RuntimeStreamLaunch {
     /// Request-dynamic prompt layers preserved for the physical Provider permit.
     /// 为物理 Provider 许可保留的请求动态提示词层。
     pub(crate) dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub(crate) fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical conversation snapshot handed to `vulcan-core`.
     /// 交给 `vulcan-core` 的规范会话快照。
     pub(crate) core_snapshot: CoreConversationSnapshot,
@@ -149,6 +152,7 @@ pub(crate) fn build_runtime_stream_launch_payload(
         warnings: bootstrap.warnings,
         system_preamble: bootstrap.system_preamble,
         dynamic_prompt_layers: bootstrap.dynamic_prompt_layers,
+        fixed_instruction_layers: bootstrap.fixed_instruction_layers,
         locked_baseline: bootstrap.locked_baseline,
         core_snapshot: bootstrap.core_snapshot,
         stream_state: RuntimeStreamDeltaState::new(bootstrap.core_controller)
@@ -746,6 +750,7 @@ mod tests {
             warnings: vec![String::from("warning")],
             system_preamble: String::from("system preamble"),
             dynamic_prompt_layers: CoreProviderPromptLayers::default(),
+            fixed_instruction_layers: CoreProviderPromptLayers::default(),
             locked_baseline: LockedBaselineProjection::empty(),
             core_snapshot,
             core_controller,
@@ -1339,6 +1344,7 @@ mod tests {
         let crate::agent_runtime::runtime_stream_bootstrap_core::RuntimeBootstrapCore {
             system_preamble,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             core_snapshot,
             core_controller,
@@ -1357,6 +1363,7 @@ mod tests {
             warnings: Vec::new(),
             system_preamble,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             core_snapshot,
             core_controller,
@@ -1627,6 +1634,7 @@ mod tests {
             system_preamble,
             prompt_layers: _,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             core_snapshot,
             core_controller,
@@ -1678,6 +1686,7 @@ mod tests {
             warnings: Vec::new(),
             system_preamble,
             dynamic_prompt_layers,
+            fixed_instruction_layers,
             locked_baseline,
             core_snapshot,
             core_controller,

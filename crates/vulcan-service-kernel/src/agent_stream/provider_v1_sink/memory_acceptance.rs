@@ -121,6 +121,7 @@ fn memory_acceptance_candidate(
             None,
         )),
         dynamic_prompt_layers: ProviderPromptLayers::default(),
+        fixed_instruction_layers: ProviderPromptLayers::default(),
         locked_baseline: host_guided_locked_baseline(),
     };
     (facts, candidate)

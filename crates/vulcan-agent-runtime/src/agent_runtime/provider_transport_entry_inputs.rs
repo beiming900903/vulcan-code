@@ -76,6 +76,9 @@ pub(crate) struct PreparedProviderTransportStreamLaunch {
     /// Request-dynamic prompt layers carried to the typed preparation candidate.
     /// 传递到强类型准备候选的请求动态提示词层。
     pub(crate) dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub(crate) fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical conversation snapshot consumed by the host-owned controller loop.
     /// 由宿主自有控制器循环消费的规范会话快照。
     pub(crate) core_snapshot: CoreConversationSnapshot,
@@ -187,6 +190,7 @@ pub(crate) fn prepare_provider_transport_stream_launch(
         execution_mode,
         system_preamble,
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         prompt,
         turn_start_mode,
@@ -230,6 +234,7 @@ pub(crate) fn prepare_provider_transport_stream_launch(
     PreparedProviderTransportStreamLaunch {
         runtime_inputs,
         dynamic_prompt_layers,
+        fixed_instruction_layers,
         locked_baseline,
         core_snapshot,
         prompt_intervention,

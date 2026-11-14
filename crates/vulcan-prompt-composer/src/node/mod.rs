@@ -31,7 +31,11 @@ pub fn render_node(
                     "Provider Base System Prompt",
                     &snapshot.text,
                     snapshot.source_label.clone(),
-                ),
+                )
+                .with_baseline_provenance(PromptBaselineProvenance::new(
+                    PromptBaselineKind::FixedInstruction,
+                    "provider-base-system",
+                )),
             )
         }),
         PlannedNode::AgentBaseSystem => input.agent_prompt.as_ref().map(|snapshot| {
@@ -45,6 +49,14 @@ pub fn render_node(
                     "Agent Base System Prompt",
                     &snapshot.text,
                     snapshot.source_label.clone(),
+                )
+                .with_optional_baseline_provenance(
+                    snapshot.fixed_instruction.then(|| {
+                        PromptBaselineProvenance::new(
+                            PromptBaselineKind::FixedInstruction,
+                            "agent-base-system",
+                        )
+                    }),
                 ),
             )
         }),
@@ -298,8 +310,17 @@ impl CachedSegmentDescriptor {
 
     /// Attaches producer-declared locked-baseline provenance to this descriptor.
     /// 为当前描述附加由生产者声明的锁定基线来源。
-    fn with_baseline_provenance(mut self, provenance: PromptBaselineProvenance) -> Self {
-        self.baseline_provenance = Some(provenance);
+    fn with_baseline_provenance(self, provenance: PromptBaselineProvenance) -> Self {
+        self.with_optional_baseline_provenance(Some(provenance))
+    }
+
+    /// Sets the optional producer provenance and returns the updated cache descriptor.
+    /// 设置生产者的可选来源信息，并返回更新后的缓存描述。
+    fn with_optional_baseline_provenance(
+        mut self,
+        provenance: Option<PromptBaselineProvenance>,
+    ) -> Self {
+        self.baseline_provenance = provenance;
         self
     }
 }

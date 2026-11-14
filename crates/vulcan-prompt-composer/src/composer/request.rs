@@ -20,8 +20,8 @@ pub struct AdditionalPromptSegment {
     /// Human-readable source label used only for diagnostics.
     /// 仅用于诊断的人类可读来源标签。
     pub source_label: String,
-    /// Producer-declared baseline provenance, or `None` for request-dynamic content.
-    /// 生产者声明的基线来源；请求动态内容为 `None`。
+    /// Producer-declared stable provenance, or `None` for request-dynamic content.
+    /// 生产者声明的稳定来源；请求动态内容为 `None`。
     pub baseline_provenance: Option<PromptBaselineProvenance>,
 }
 
@@ -41,8 +41,8 @@ impl AdditionalPromptSegment {
         }
     }
 
-    /// Builds one producer-declared mutable baseline segment.
-    /// 构建一条由生产者声明的可变基线片段。
+    /// Builds one producer-declared stable segment with the supplied provenance.
+    /// 使用给定来源构建一条由生产者声明的稳定片段。
     pub fn locked(
         title: impl Into<String>,
         body: impl Into<String>,

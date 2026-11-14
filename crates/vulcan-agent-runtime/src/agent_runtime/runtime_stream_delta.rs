@@ -951,6 +951,7 @@ pub(crate) fn test_request_prepared_delta(
             request_budget_guard: None,
             locked_baseline: vulcan_session_core::v1::context::LockedBaselineProjection::empty(),
             dynamic_prompt_layers: vulcan_core::types::ProviderPromptLayers::default(),
+            fixed_instruction_layers: Default::default(),
         },
         completion,
     }

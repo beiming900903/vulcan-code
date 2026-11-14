@@ -96,6 +96,9 @@ pub(crate) struct RuntimeBootstrapCore {
     /// Request-dynamic prompt layers excluded from the locked context baseline.
     /// 从锁定上下文基线中排除的请求动态提示词层。
     pub dynamic_prompt_layers: CoreProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub fixed_instruction_layers: CoreProviderPromptLayers,
     /// Canonical locked baseline derived from the same typed prompt composition.
     /// 从同一强类型提示词组合推导出的规范锁定基线。
     pub locked_baseline: LockedBaselineProjection,
@@ -209,6 +212,7 @@ pub(crate) fn build_runtime_bootstrap_core(
         system_preamble,
         prompt_layers: stable_prompt_layers,
         dynamic_prompt_layers: runtime_prompt.dynamic_prompt_layers,
+        fixed_instruction_layers: runtime_prompt.fixed_instruction_layers,
         locked_baseline: runtime_prompt.locked_baseline,
         core_snapshot,
         core_controller,

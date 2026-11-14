@@ -94,6 +94,9 @@ pub struct ProviderRequestPreparationCandidate {
     /// Request-dynamic prompt layers emitted by the same unique prompt composer.
     /// 由同一个唯一提示词组合器生成的请求动态提示词层。
     pub dynamic_prompt_layers: ProviderPromptLayers,
+    /// Fixed system and developer instructions carried to the physical request head.
+    /// 传递到物理请求头部的固定系统和开发者指令。
+    pub fixed_instruction_layers: ProviderPromptLayers,
 }
 
 impl ProviderRequestPreparationCandidate {
