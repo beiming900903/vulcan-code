@@ -171,6 +171,27 @@ describe("folder picker browsing", () => {
     } finally { await picker.cleanup() }
   })
 
+  // Verifies the footer button opens the typed path first so confirmation follows the listing.
+  // 验证底部按钮会先打开输入的路径，确认动作随后再以目录列表为准。
+  it("opens the typed path from the footer button before confirming", async () => {
+    const picker = await openPicker()
+    try {
+      await act(async () => picker.query<HTMLButtonElement>("[data-folder-picker-edit]")!.click())
+      const input = picker.query<HTMLInputElement>(".project-folder-picker-path-input")!
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "C:\\Users")
+        input.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+      const confirmButton = picker.query<HTMLButtonElement>("[data-folder-picker-confirm]")!
+      expect(confirmButton.disabled).toBe(false)
+      expect(picker.query("[data-folder-picker-unbrowsed]")).not.toBeNull()
+      await act(async () => confirmButton.click())
+      expect(picker.browse).toHaveBeenLastCalledWith("C:\\Users")
+      expect(picker.selection()).toBe("C:\\Users")
+      expect(picker.confirm).not.toHaveBeenCalled()
+    } finally { await picker.cleanup() }
+  })
+
   // Verifies existing projects add their folder as a place and mark their own row.
   // 验证已有项目会把其上级目录加入常用位置，并标记自身所在行。
   it("offers project folders as places and marks existing projects", async () => {

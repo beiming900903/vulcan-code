@@ -380,13 +380,18 @@ export function ProjectFolderPickerDialog({
     }
   }, [onConfirm, onOpenChange, selectedPath]);
 
+  // openTypedPath loads the manually entered path when it is not empty.
+  // openTypedPath 在输入非空时加载手动输入的路径。
+  const openTypedPath = () => {
+    const typed = pathInput.trim();
+    if (typed !== "") navigate(typed);
+  };
+
   // handlePathSubmit loads the manually entered path.
   // handlePathSubmit 加载手动输入的路径。
   const handlePathSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const typed = pathInput.trim();
-    if (typed === "") return;
-    navigate(typed);
+    openTypedPath();
   };
 
   // cancelPathEdit restores the browsed path and the breadcrumb.
@@ -625,9 +630,13 @@ export function ProjectFolderPickerDialog({
           <Button disabled={submitting} onClick={() => onOpenChange(false)} type="button" variant="outline">
             {t("conversation.action.cancel")}
           </Button>
-          <Button disabled={!selectedPath || busy} onClick={handleConfirm} type="button" data-folder-picker-confirm="">
-            {submitting ? <Spinner /> : <Check size={16} />}
-            {submitting ? t("projectFolderPicker.adding") : (confirmLabel ?? t("sidebar.addProject"))}
+          {/* While the path field is edited the primary button opens that path first; the
+              selection is only confirmed once the listing owns it again.
+              路径输入被编辑时主按钮先打开该路径；目录列表重新拥有选择后才可确认。 */}
+          <Button disabled={pathEdited ? busy || pathInput.trim() === "" : !selectedPath || busy}
+            onClick={pathEdited ? openTypedPath : handleConfirm} type="button" data-folder-picker-confirm="">
+            {submitting ? <Spinner /> : (pathEdited ? <ArrowRight size={16} /> : <Check size={16} />)}
+            {submitting ? t("projectFolderPicker.adding") : (pathEdited ? t("projectFolderPicker.openPath") : (confirmLabel ?? t("sidebar.addProject")))}
           </Button>
         </DialogFooter>
       </DialogContent>

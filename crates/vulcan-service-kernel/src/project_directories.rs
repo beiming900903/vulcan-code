@@ -221,10 +221,154 @@ fn platform_project_directory_roots() -> Vec<ProjectDirectoryRootSummary> {
 /// 平台相关的根目录列表。
 #[cfg(not(windows))]
 fn platform_project_directory_roots() -> Vec<ProjectDirectoryRootSummary> {
-    vec![ProjectDirectoryRootSummary {
+    let mut roots = vec![ProjectDirectoryRootSummary {
         label: String::from("/"),
         path: String::from("/"),
-    }]
+    }];
+    for mount in unix_mounted_volume_paths() {
+        let path = normalized_workspace_path_text_from_path(&mount);
+        if roots.iter().any(|root| root.path == path) {
+            continue;
+        }
+        roots.push(ProjectDirectoryRootSummary {
+            label: unix_volume_root_label(&mount),
+            path,
+        });
+    }
+    roots
+}
+
+/// Well-known Unix automount bases scanned for picker volume roots, paired with the directory
+/// depth that may contain mount points: `/media` and `/run/media` hold either direct mounts or one
+/// user level, while `/mnt` and `/Volumes` hold mounts directly.
+/// 扫描选择器卷根的常见 Unix 自动挂载基目录，并给出可能包含挂载点的目录层级：`/media` 与
+/// `/run/media` 下可能是直接挂载或再隔一层用户目录，`/mnt` 与 `/Volumes` 下直接是挂载点。
+#[cfg(not(windows))]
+const UNIX_VOLUME_BASES: &[(&str, usize)] = &[
+    ("/media", 2),
+    ("/run/media", 2),
+    ("/mnt", 1),
+    ("/Volumes", 1),
+];
+
+/// Lists mounted volumes below the well-known Unix automount bases.
+/// 列出常见 Unix 自动挂载基目录下已挂载的卷。
+///
+/// # Returns
+/// 返回值
+/// Directory paths whose device differs from their parent, meaning each is a real mount point.
+/// 设备号与父目录不同的目录路径，即每个都是真实挂载点。
+#[cfg(not(windows))]
+fn unix_mounted_volume_paths() -> Vec<PathBuf> {
+    let mut mounts = Vec::new();
+    for (base, depth) in UNIX_VOLUME_BASES {
+        collect_unix_mounted_volumes(Path::new(base), *depth, &mut mounts);
+    }
+    mounts
+}
+
+/// Collects mount points below `directory`, descending one extra level while `depth` allows so
+/// per-user containers such as `/media/<user>` yield their own mounts.
+/// 收集 `directory` 下的挂载点；`depth` 允许时多下一层，使 `/media/<user>` 这类用户目录
+/// 能贡献其中的挂载点。
+///
+/// # Parameters
+/// 参数
+/// `directory` is the base scanned with `read_dir`; `depth` counts how many levels may hold mounts.
+/// `directory` 是用 `read_dir` 扫描的基目录；`depth` 是仍可能含挂载点的剩余层数。
+/// `mounts` receives each discovered mount point.
+/// `mounts` 接收每个发现的挂载点。
+#[cfg(not(windows))]
+fn collect_unix_mounted_volumes(directory: &Path, depth: usize, mounts: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_plain_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+        if !is_plain_directory {
+            continue;
+        }
+        if unix_path_is_mount_point(&path) {
+            mounts.push(path);
+        } else if depth > 1 {
+            collect_unix_mounted_volumes(&path, depth - 1, mounts);
+        }
+    }
+}
+
+/// Tells whether `path` is a mount point by comparing its device with its parent's.
+/// 通过比较 `path` 与其父目录的设备号判断它是否为挂载点。
+///
+/// # Parameters
+/// 参数
+/// `path` is the candidate directory; a missing or unreadable parent counts as not mounted.
+/// `path` 是候选目录；父目录缺失或不可读时视为未挂载。
+///
+/// # Returns
+/// 返回值
+/// `true` when the directory lives on a different device than its parent.
+/// 当目录位于与父目录不同的设备上时返回 `true`。
+#[cfg(not(windows))]
+fn unix_path_is_mount_point(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    match (fs::metadata(path), fs::metadata(parent)) {
+        (Ok(child), Ok(parent)) => child.dev() != parent.dev(),
+        _ => false,
+    }
+}
+
+/// Builds the picker label for one Unix volume root from its final path component.
+/// 用末级路径段为一个 Unix 卷根生成选择器标签。
+///
+/// # Parameters
+/// 参数
+/// `path` is the mount point; roots without a file name fall back to the full path text.
+/// `path` 是挂载点；没有文件名的根回退为完整路径文本。
+///
+/// # Returns
+/// 返回值
+/// The mount's folder name, or the normalized path when no name exists.
+/// 挂载点的目录名；没有名称时返回规范化路径。
+#[cfg(not(windows))]
+fn unix_volume_root_label(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| normalized_workspace_path_text_from_path(path))
+}
+
+/// Resolves the deepest mount point owning `path`, or `/` when no ancestor switch device.
+/// 解析拥有 `path` 的最深挂载点；没有祖先发生设备切换时返回 `/`。
+///
+/// # Parameters
+/// 参数
+/// `path` is the browsed directory; the first ancestor whose device differs from its parent wins.
+/// `path` 是当前浏览目录；首个设备号与其父目录不同的祖先即挂载点。
+///
+/// # Returns
+/// 返回值
+/// The mount point that contains the path, falling back to `/`.
+/// 包含该路径的挂载点，找不到时回退为 `/`。
+#[cfg(not(windows))]
+fn unix_deepest_mount_point(path: &Path) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+    let device_of = |candidate: &Path| fs::metadata(candidate).ok().map(|meta| meta.dev());
+    for ancestor in path.ancestors() {
+        let Some(parent) = ancestor.parent() else {
+            break;
+        };
+        if matches!(
+            (device_of(ancestor), device_of(parent)),
+            (Some(child), Some(parent_device)) if child != parent_device
+        ) {
+            return ancestor.to_path_buf();
+        }
+    }
+    PathBuf::from("/")
 }
 
 /// Resolves the filesystem root that owns one path.
@@ -275,14 +419,14 @@ fn project_directory_root_from_path(path: &Path) -> Option<ProjectDirectoryRootS
 /// 当选择器可表示该根目录时返回所属根。
 #[cfg(not(windows))]
 fn project_directory_root_from_path(path: &Path) -> Option<ProjectDirectoryRootSummary> {
-    if path.is_absolute() {
-        Some(ProjectDirectoryRootSummary {
-            label: String::from("/"),
-            path: String::from("/"),
-        })
-    } else {
-        None
+    if !path.is_absolute() {
+        return None;
     }
+    let mount = unix_deepest_mount_point(path);
+    Some(ProjectDirectoryRootSummary {
+        label: unix_volume_root_label(&mount),
+        path: normalized_workspace_path_text_from_path(&mount),
+    })
 }
 
 /// Converts one filesystem directory entry into a WebUI directory row.
@@ -1080,5 +1224,32 @@ mod tests {
                     &second_path.display().to_string()
                 ))
         );
+    }
+
+    /// Verifies mount detection calls proc a mount point and a plain child directory none.
+    /// 验证挂载检测把 proc 视为挂载点，而把普通子目录视为非挂载点。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unix_mount_point_detection_matches_device_switch() {
+        assert!(unix_path_is_mount_point(Path::new("/proc")));
+        let root = std::env::temp_dir().join(format!("vulcan-mounts-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("child")).expect("nested directory");
+        assert!(!unix_path_is_mount_point(&root.join("child")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Verifies the picker root resolves the deepest owning mount and enumerated volumes are real.
+    /// 验证选择器根解析为最深所属挂载点，且枚举出的卷都是真实挂载点。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unix_deepest_mount_point_resolves_owning_mount() {
+        assert_eq!(
+            unix_deepest_mount_point(Path::new("/proc/self")),
+            PathBuf::from("/proc")
+        );
+        for mount in unix_mounted_volume_paths() {
+            assert!(mount.is_dir(), "{}", mount.display());
+            assert!(unix_path_is_mount_point(&mount), "{}", mount.display());
+        }
     }
 }

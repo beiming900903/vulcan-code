@@ -261,8 +261,46 @@ pub fn service_add_project_initial_directory(
         .workbench
         .projects
         .first()
-        .map(|project| project.path.clone())
-        .unwrap_or_else(|| normalized_workspace_path_text_from_path(&workspace_root())))
+        .map(|project| project_directory_parent_or_self(&project.path))
+        .unwrap_or_else(default_project_initial_directory))
+}
+
+/// Returns the picker start directory for one existing project path: the folder holding the
+/// project so a sibling project is one click away, or the project directory itself when it has
+/// no usable parent.
+/// 为单个已有项目路径返回选择器起始目录：容纳该项目的上级目录，使同级新项目一键可达；
+/// 没有可用上级目录时返回项目目录本身。
+///
+/// # Parameters
+/// 参数
+/// `project_path` is the normalized stored path of an existing project.
+/// `project_path` 是已有项目存储的规范化路径。
+///
+/// # Returns
+/// 返回值
+/// A normalized directory path string suitable for the host folder picker.
+/// 返回适合宿主文件夹选择器使用的标准化目录路径字符串。
+fn project_directory_parent_or_self(project_path: &str) -> String {
+    let path = std::path::Path::new(project_path);
+    normalized_workspace_path_text_from_path(
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(path),
+    )
+}
+
+/// Returns the picker start directory used before any project exists: the user home directory,
+/// or the service workspace root when no home directory can be resolved.
+/// 返回尚无任何项目时选择器使用的起始目录：用户主目录；无法解析主目录时回退为服务工作区根。
+///
+/// # Returns
+/// 返回值
+/// A normalized directory path string suitable for the host folder picker.
+/// 返回适合宿主文件夹选择器使用的标准化目录路径字符串。
+fn default_project_initial_directory() -> String {
+    normalized_workspace_path_text_from_path(
+        &vulcan_runtime_assets::user_home_dir().unwrap_or_else(workspace_root),
+    )
 }
 
 /// Toggles one project pinned state without rebuilding the full workbench snapshot.
