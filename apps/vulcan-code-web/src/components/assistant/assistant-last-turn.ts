@@ -44,6 +44,9 @@ export interface AssistantLastTurn {
   /** Prompt text of the turn; empty when only resources were sent, null when the turn has no user input.
    * 本轮提示词；只发送资源时为空字符串，回合没有用户输入时为 null。 */
   prompt: string | null;
+  /** The opening input's seq once its business turn has closed, or null while open or absent.
+   * 业务回合结束后记录首条输入的 seq；回合仍开放或不存在时为 null。 */
+  closedStartSeq: number | null;
   /** Project resources attached to the prompt, in send order.
    * 随提示词发送的项目资源，按发送顺序。 */
   resourceIds: ResourceId[];
@@ -68,9 +71,12 @@ export interface AssistantLastTurn {
  * @returns the last turn; an empty session yields no prompt and no steps. */
 export function projectAssistantLastTurn(events: readonly ConversationEventSummary[]): AssistantLastTurn {
   const start = lastTurnStartIndex(events);
-  const turn: AssistantLastTurn = { prompt: null, resourceIds: [], fileReferences: [], steps: [], total: null, durationMs: null, error: null };
+  const turn: AssistantLastTurn = { prompt: null, closedStartSeq: null, resourceIds: [], fileReferences: [], steps: [], total: null, durationMs: null, error: null };
   if (start < 0) return turn;
-  const startEvent = events[start].event;
+  // The opening input owns the turn identity used to match its durable closure.
+  // 首条输入提供匹配该回合持久化结束事件所需的回合标识。
+  const openingInput = events[start];
+  const startEvent = openingInput.event;
   if (startEvent.kind === "user_input") {
     // Use the same projection as the full transcript for compact assistant prompts.
     // 紧凑助手提示词与完整会话使用相同的投影。
@@ -106,6 +112,11 @@ export function projectAssistantLastTurn(events: readonly ConversationEventSumma
         if (event.purpose === "compaction") break;
         step(event.api_call_id).usage = assistantUsage(event.usage);
         step(event.api_call_id).durationMs = requestDuration(event.timing);
+        break;
+      case "turn_boundary":
+        if (event.purpose === "business" && entry.turn_id !== null && entry.turn_id === openingInput.turn_id) {
+          turn.closedStartSeq = openingInput.seq;
+        }
         break;
       case "turn_stats":
         turn.total = assistantUsage(event.buckets.total.usage);

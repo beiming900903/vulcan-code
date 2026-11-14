@@ -2,8 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AssistantComposer } from "./assistant-conversation";
+import { AssistantComposer, AssistantConversation } from "./assistant-conversation";
 import { classifyDroppedComposerFiles, stageDroppedComposerFile } from "@/service/conversation-actions-service";
+import type { ConversationEventWindowControllerSnapshot } from "@/service/conversation-event-window-controller";
+import { clientActionId, type ConversationEventSummary } from "@/service/conversation-event-window-store";
 
 // Only the text catalog and the service boundary are synthetic.
 // 仅文案目录与服务边界为合成。
@@ -21,6 +23,21 @@ vi.mock("@/service/conversation-actions-service", () => ({
   stageDroppedComposerFile: vi.fn(),
   stopConversationRun: vi.fn(),
   submitConversationPrompt: (...args: unknown[]) => submitConversationPrompt(...args),
+}));
+
+// The assistant transcript test supplies successive snapshots at the live reader boundary.
+// 助手转录测试在实时读取器边界提供连续的快照。
+let assistantSnapshot: ConversationEventWindowControllerSnapshot;
+vi.mock("@/state/conversation-session-event-window-owner-v1", () => ({
+  useConversationSessionEventWindowOwnerV1: () => ({
+    loading: false,
+    error: null,
+    reader: {
+      subscribe: () => () => undefined,
+      getSnapshot: () => assistantSnapshot,
+      getServerSnapshot: () => assistantSnapshot,
+    },
+  }),
 }));
 
 let host: HTMLDivElement;
@@ -72,6 +89,60 @@ async function sendPending(text: string) {
   expect(submitConversationPrompt).toHaveBeenCalledOnce();
   return async () => { await act(async () => resolve({ accepted: true })); };
 }
+
+describe("floating assistant memory status", () => {
+  it("shows the locked guide and marks only closed turns inside the lock span", async () => {
+    // The retained turn happened before the lock, and the two later turns start inside it.
+    // 保留的回合发生在锁定前，随后的两轮从锁定区间内开始。
+    const assistant = { id: "locked-assistant", name: "Translator", projectId: null, projectName: null, running: false };
+    assistantSnapshot = {
+      owner: { session_id: assistant.id, window_generation: 1 },
+      service_epoch: "fixture",
+      memory_revision: 1,
+      durable_revision: 1,
+      events: [],
+      older_before_seq: null,
+      has_more: false,
+      open_turn_id: null,
+      open_turn_start_seq: null,
+      session_config: {
+        answer_mode: { mode: "standard", revision: 0, prepared: null },
+        permission_mode: "workspace_write",
+        current_request: { provider: null, connection_id: null, model: null, thinking_level: null, temperature: null, set_at_ms: null },
+        next_request: null,
+        context_window_selection: null,
+        dedicated: { tool_access: "none", base_prompt: "Translate", locked_spans: [{ locked_at_seq: 10, unlocked_at_seq: null }] },
+      },
+    };
+    // Render the supplied events and read the current memory announcement.
+    // 渲染给定事件并读取当前的记忆提示。
+    const render = async (events: readonly ConversationEventSummary[], running: boolean) => {
+      assistantSnapshot = { ...assistantSnapshot, events };
+      await act(async () => root.render(<AssistantConversation assistant={{ ...assistant, running }} />));
+      return host.querySelector(".assistant-turn-memory[role='status']")?.textContent;
+    };
+    // Model a turn whose input starts at seq; its closure may be delivered in a later update.
+    // 构造起点为 seq 的回合，结束事件可能在后续更新中送达。
+    const turn = (seq: number): [ConversationEventSummary, ConversationEventSummary] => [
+      {
+        seq, turn_id: seq, created_at_ms: seq, updated_at_ms: seq, event_revision: 1, visibility: "provider",
+        event: { kind: "user_input", client_action_id: clientActionId(`action-${seq}`), input_id: seq, input_source: "root", text: "Translate this" },
+      },
+      {
+        seq: seq + 1, turn_id: seq, created_at_ms: seq + 1, updated_at_ms: seq + 1, event_revision: 1, visibility: "ui_only",
+        event: { kind: "turn_boundary", purpose: "business", reason: "completed", outcome: "completed" },
+      },
+    ];
+
+    expect(await render(turn(1), false)).toBe("");
+    expect(host.querySelector(".assistant-memory")?.textContent).toContain("assistantDock.memoryGuide");
+    for (const seq of [11, 20]) {
+      const [opening, closing] = turn(seq);
+      expect(await render([opening], true)).toBe("");
+      expect(await render([opening, closing], false)).toBe("assistantDock.turnNotRemembered");
+    }
+  });
+});
 
 describe("assistant composer", () => {
   it("shows a rejected file in the attachment strip and sends its path without staging", async () => {

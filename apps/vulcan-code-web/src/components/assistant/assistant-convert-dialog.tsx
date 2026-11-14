@@ -1,4 +1,5 @@
 import React from "react";
+import { toast } from "@/ui-kit/primitives/toast";
 import { dedicatedErrorMessage } from "@/components/composer/dedicated/dedicated-errors";
 import { Button } from "@/ui-kit/primitives/button";
 import {
@@ -40,6 +41,7 @@ export function AssistantConvertDialog(props: {
     setError(null);
     try {
       await props.onConvert(name.trim());
+      toast.success(t("assistantDock.converted"));
       props.onOpenChange(false);
     } catch (reason) {
       setError(dedicatedErrorMessage(reason, t));

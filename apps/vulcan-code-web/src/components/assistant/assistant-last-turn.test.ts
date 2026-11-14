@@ -41,6 +41,7 @@ describe("projectAssistantLastTurn", () => {
       durationMs: 2500,
     });
     expect(turn.total).toBeNull();
+    expect(turn.closedStartSeq).toBeNull();
   });
 
   it("reports the closed-turn total and marks a block still streaming", () => {
@@ -63,8 +64,22 @@ describe("projectAssistantLastTurn", () => {
 
   it("returns an empty turn for a session without user input", () => {
     expect(projectAssistantLastTurn([])).toEqual({
-      prompt: null, resourceIds: [], fileReferences: [], steps: [], total: null, durationMs: null, error: null,
+      prompt: null, closedStartSeq: null, resourceIds: [], fileReferences: [], steps: [], total: null, durationMs: null, error: null,
     });
+  });
+
+  it("marks closure only for the displayed business turn, even when another turn closes", () => {
+    // The assistant can receive closures for auxiliary work alongside its latest turn.
+    // 助手的最后一轮进行期间也可能收到辅助工作的结束事件。
+    const otherClosures = [
+      { ...event(3, { kind: "turn_boundary", reason: "completed", outcome: "completed", purpose: "business" }), turn_id: 2 },
+      event(4, { kind: "turn_boundary", reason: "completed", outcome: "completed", purpose: "question_execution" }),
+    ];
+    // Stop and failure also close a business turn even if it produced no reply.
+    // 即使没有回复，停止和失败也会结束业务回合。
+    const closed = event(5, { kind: "turn_boundary", reason: "stopped", outcome: "stopped", purpose: "business" });
+    expect(projectAssistantLastTurn([input(2, "task"), ...otherClosures]).closedStartSeq).toBeNull();
+    expect(projectAssistantLastTurn([input(2, "task"), ...otherClosures, closed]).closedStartSeq).toBe(2);
   });
 
   it("separates path references from the compact transcript prompt", () => {

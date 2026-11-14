@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowUp, Check, Copy, Square } from "lucide-react";
+import { ArrowUp, Check, Copy, Lock, Square } from "lucide-react";
 import { toast } from "@/ui-kit/primitives/toast";
 import { ComposerAttachmentStrip } from "@/components/composer/composer-attachment-controls";
 import { composerAttachmentMedia } from "@/components/composer/composer-attachment-media";
@@ -27,6 +27,7 @@ import {
   stopConversationRun,
   submitConversationPrompt,
 } from "@/service/conversation-actions-service";
+import { dedicatedTurnForgotten, selectDedicatedMemory } from "@/service/dedicated-memory";
 import { useConversationSessionEventWindowOwnerV1 } from "@/state/conversation-session-event-window-owner-v1";
 import { useConversationSessionResourcesV1 } from "@/state/conversation-session-resources-v1";
 import type { ComposerAttachmentCapabilitySummary, ComposerAttachmentSummary } from "@/types";
@@ -46,7 +47,11 @@ const assistantAttachmentDrafts = new Map<string, ComposerAttachmentSummary[]>()
 const assistantPickerCapabilities: ComposerAttachmentCapabilitySummary[] = [];
 
 /** Compact live view of one assistant: only its last turn plus an input; the session keeps everything.
- * 单个助手的精简实时视图：只显示最后一轮与输入框；完整内容保留在会话中。 */
+ * 单个助手的精简实时视图：只显示最后一轮与输入框；完整内容保留在会话中。
+ * @param props.assistant floating assistant identity and live run state.
+ *                        浮动助手标识及实时运行状态。
+ * @returns the memory status, latest turn, and composer.
+ *          记忆状态、最后一轮及输入区。 */
 export function AssistantConversation(props: { assistant: AssistantEntry }) {
   const { t } = useI18n();
   const owner = useConversationSessionEventWindowOwnerV1({
@@ -58,6 +63,11 @@ export function AssistantConversation(props: { assistant: AssistantEntry }) {
   // 紧凑助手界面在自己的渲染器中消费完整的规范回复。
   const snapshot = React.useSyncExternalStore(owner.reader.subscribe, owner.reader.getSnapshot, owner.reader.getServerSnapshot);
   const turn = React.useMemo(() => projectAssistantLastTurn(snapshot.events), [snapshot.events]);
+  // A converted assistant may still show a turn from before its memory was locked.
+  // 刚转换的助手仍可能显示锁定记忆前的一轮。
+  const memory = turn.closedStartSeq === null ? null : selectDedicatedMemory(snapshot);
+  const turnForgotten = memory !== null && turn.closedStartSeq !== null
+    && dedicatedTurnForgotten(memory.lockedSpans, turn.closedStartSeq, false);
   const resources = useConversationSessionResourcesV1(props.assistant.id, turn.resourceIds);
   const promptAttachments = React.useMemo(
     () => turn.resourceIds.map((resourceId) => composerAttachmentForResource(resourceId, resources)),
@@ -74,6 +84,13 @@ export function AssistantConversation(props: { assistant: AssistantEntry }) {
   }, [running, turn]);
   return (
     <div className="assistant-conversation">
+      <div className="assistant-memory">
+        <p className="assistant-memory-title">
+          <Lock size={14} aria-hidden="true" />
+          {t("conversation.dedicatedNotice.locked")}
+        </p>
+        <p>{t("assistantDock.memoryGuide")}</p>
+      </div>
       <div ref={scrollRef} className="assistant-conversation-scroll">
         {owner.error ? <p className="assistant-conversation-error">{owner.error}</p> : null}
         {turn.prompt === null && !owner.loading ? (
@@ -100,6 +117,9 @@ export function AssistantConversation(props: { assistant: AssistantEntry }) {
           usage={turn.total}
         />
       ) : null}
+      <p className="assistant-turn-memory" role="status">
+        {turnForgotten ? t("assistantDock.turnNotRemembered") : null}
+      </p>
       <AssistantComposer
         assistant={props.assistant}
         running={running}

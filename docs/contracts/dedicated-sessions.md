@@ -105,6 +105,8 @@
 - **浮动助手**（`components/assistant/`）：记忆锁定条在锁定后提供“转换为助手”并弹出命名对话框；转换的会话
   若正被选中，主视图移到同项目的新草稿（不自动选择用户未选的其他会话）。侧栏列表排除带 `assistantName` 的会话，但它们仍留在
   `workbench.conversations` 中供停靠控制器使用。
+  - 转换成功后显示确认提示并打开浮窗。浮窗顶部常驻记忆锁定状态和专职用途说明。最后一轮收到同一回合的业务
+    结束事件后，按回合起点与生效锁定区间判定是否显示“本轮内容不会带入下一轮”。
   - 助手永远不会被自动选入主视图：工作区索引的默认选择（`loading.rs`）跳过带 `assistant_name` 的会话，
     WebUI 的归档回退与后端选择校验（`state/workbench-state.ts` `fallbackMainViewConversationId`）同样排除助手；
     仅剩助手时主视图进入新建草稿（`empty-workbench-route.ts`）。
