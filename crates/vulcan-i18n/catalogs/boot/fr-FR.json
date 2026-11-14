@@ -1,4 +1,5 @@
 {
+  "downloadingSkill": "Téléchargement de la compétence {skill}",
   "loadingWorkspace": "Chargement du Workspace",
   "connectingService": "Connexion à Vulcan Core Service",
   "loadingProjectIndex": "Chargement des index de projets et de conversations",

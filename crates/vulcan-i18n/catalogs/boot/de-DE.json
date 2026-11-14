@@ -1,4 +1,5 @@
 {
+  "downloadingSkill": "Skill {skill} wird heruntergeladen",
   "loadingWorkspace": "Workspace wird geladen",
   "connectingService": "Verbindung mit Vulcan Core Service wird hergestellt",
   "loadingProjectIndex": "Projekt- und Unterhaltungsindizes werden geladen",

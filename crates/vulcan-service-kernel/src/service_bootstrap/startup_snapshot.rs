@@ -73,6 +73,7 @@ pub(crate) fn startup_steps_with_status(
             completed_bytes: None,
             total_bytes: None,
             progress_phase: None,
+            skill_id: None,
             updated_at: Some(updated_at),
         })
         .collect()
@@ -87,6 +88,9 @@ pub(crate) fn startup_step_label(id: &str) -> String {
         "luaskills" => "LuaSkills",
         "mcp" => "MCP Runtime",
         "plugins" => "Plugin Runtime",
+        "providers" => "Model Providers",
+        "memory" => "Memory",
+        "agent-runtime" => "Agent Runtime",
         "workspace" => "Workspace",
         _ => id,
     }

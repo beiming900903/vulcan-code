@@ -1,4 +1,5 @@
 {
+  "downloadingSkill": "スキル {skill} をダウンロード中",
   "loadingWorkspace": "Workspace を読み込んでいます",
   "connectingService": "Vulcan Core Service に接続しています",
   "loadingProjectIndex": "プロジェクトと会話のインデックスを読み込んでいます",

@@ -26,6 +26,9 @@ export interface StartupProgressLabels {
   // Managed-runtime download progress label.
   // 受管运行时下载进度标签。
   downloadProgress: string;
+  // Text shown during a skill archive transfer, including its identity.
+  // 技能归档传输期间显示的文案，包含技能标识。
+  downloadingSkill?: string;
 }
 
 // StartupProgressPanel renders the startup lockup with the live progress block beneath it. The lockup is pinned to the
@@ -61,7 +64,9 @@ export function StartupProgressPanel(props: {
   const heading = activeStep ? labels.loadingStep.replace("{step}", activeStep.label) : labels.loadingWorkspace;
   // message shows the current startup phase without expanding the full step list.
   // message 展示当前启动阶段，而不展开完整步骤列表。
-  const message = activeStep?.message ?? (startup ? labels.loadingProjectIndex : props.detail ?? labels.connectingService);
+  const message = activeStep?.skillId && activeStep.progressPhase === "downloading" && labels.downloadingSkill
+    ? labels.downloadingSkill.replace("{skill}", activeStep.skillId)
+    : activeStep?.message ?? (startup ? labels.loadingProjectIndex : props.detail ?? labels.connectingService);
   // failed marks a step error so the message is announced and styled as the failure it is.
   // failed 标记步骤错误，使消息以失败身份播报并呈现。
   const failed = activeStep?.status === "error";

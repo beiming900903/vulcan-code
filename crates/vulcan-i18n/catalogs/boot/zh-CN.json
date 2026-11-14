@@ -1,4 +1,5 @@
 {
+  "downloadingSkill": "正在下载技能 {skill}",
   "loadingWorkspace": "正在加载 Workspace",
   "connectingService": "正在连接 Vulcan Core Service",
   "loadingProjectIndex": "正在加载项目与会话索引",

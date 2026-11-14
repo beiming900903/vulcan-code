@@ -79,6 +79,20 @@ describe("startup controls", () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("synthetic failure");
     expect(host.querySelector(".startup-progress-panel")?.getAttribute("aria-busy")).toBe("false");
   });
+  it("names the current skill with and without a real download percentage", async () => {
+    // A lengthless download remains indeterminate until Core can provide a ratio.
+    // 无总量的下载保持不定进度，直到 Core 能提供比例。
+    const skill = { id: "luaskills", label: "LuaSkills", status: "running" as const,
+      progressPhase: "downloading", skillId: "fixture-skill", completedBytes: 32 };
+    const startup = { ready: false, phase: "bootstrapping-luaskills", recentLogs: [], uiLocale: "zh-CN" };
+    await act(async () => root.render(<BootLoadingScreen startup={{ ...startup, steps: [skill] }} />));
+    expect(host.querySelector(".startup-progress-message")?.textContent).toContain(skill.skillId);
+    expect(host.querySelector('[role="progressbar"]')?.hasAttribute("aria-valuenow")).toBe(false);
+    await act(async () => root.render(<BootLoadingScreen startup={{
+      ...startup, steps: [{ ...skill, totalBytes: 100, progressPercent: 32 }],
+    }} />));
+    expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("32");
+  });
   // The surface fades out on hand-off and reports its departure only after the shared fade duration.
   // 启动层在交接时淡出，并仅在共用淡出时长结束后报告离场。
   it("fades the startup surface out before reporting that it left", async () => {

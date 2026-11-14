@@ -72,6 +72,9 @@ export interface StartupStepSnapshot {
   // Native managed-runtime progress phase when applicable.
   // 适用时的原生受管运行时进度阶段。
   progressPhase?: string | null;
+  // Stable skill identity on the active ROOT archive download.
+  // 当前 ROOT 归档下载的稳定技能标识。
+  skillId?: string | null;
 }
 
 // StartupSnapshot describes the full startup status returned by the service.

@@ -8,6 +8,7 @@ import {
   StartupWindowBar,
 } from "@/app/boot-startup-screen";
 import { resolveAppLocale } from "@/i18n-locales";
+import type { StartupSnapshot } from "@/types";
 import {
   APPEARANCE_TEXT_TIERS,
   APPEARANCE_THEMES,
@@ -29,6 +30,9 @@ interface StartupPageState {
   // Latest real stage message, or null before the first stage.
   // 最近的真实阶段消息；首个阶段之前为 null。
   detail: string | null;
+  // Latest Core state forwarded by the desktop main process.
+  // 桌面主进程转发的最新 Core 状态。
+  startup: StartupSnapshot | null;
   // Startup failure message; once set the page shows the failure instead of progress.
   // 启动失败消息；一旦设置，页面显示失败而非进度。
   failure: string | null;
@@ -37,9 +41,9 @@ interface StartupPageState {
 // DesktopStartupHost is the page interface the shell calls with `executeJavaScript`.
 // DesktopStartupHost 是桌面壳通过 `executeJavaScript` 调用的页面接口。
 interface DesktopStartupHost {
-  // Shows one real startup stage message.
-  // 显示一条真实启动阶段消息。
-  progress: (message: string) => void;
+  // Displays the launcher message and any Core snapshot supplied for this stage.
+  // 显示启动器消息及此阶段提供的 Core 快照。
+  progress: (progress: { message: string; snapshot?: Omit<StartupSnapshot, "recentLogs"> }) => void;
   // Shows the startup failure; the page keeps it until the window closes.
   // 显示启动失败；页面保持显示直至窗口关闭。
   failed: (message: string) => void;
@@ -47,7 +51,7 @@ interface DesktopStartupHost {
 
 // state and listeners form the small store the shell writes and React reads.
 // state 与 listeners 组成桌面壳写入、React 读取的小型存储。
-let state: StartupPageState = { detail: null, failure: null };
+let state: StartupPageState = { detail: null, startup: null, failure: null };
 const listeners = new Set<() => void>();
 
 // update replaces the state and re-renders the page.
@@ -58,7 +62,10 @@ function update(next: Partial<StartupPageState>): void {
 }
 
 (window as unknown as { vulcanDesktopStartup: DesktopStartupHost }).vulcanDesktopStartup = {
-  progress: (message) => update({ detail: message }),
+  progress: ({ message, snapshot }) => update({
+    detail: message,
+    startup: snapshot ? { ...snapshot, recentLogs: [] } : null,
+  }),
   failed: (message) => update({ failure: message }),
 };
 
@@ -93,7 +100,7 @@ function DesktopStartupPage() {
   return (
     <>
       {current.failure === null
-        ? <BootLoadingScreen uiLocale={locale} detail={current.detail} />
+        ? <BootLoadingScreen uiLocale={locale} detail={current.detail} startup={current.startup} />
         : <BootErrorScreen error={current.failure} uiLocale={locale} windowBar={false} />}
       {/* macOS keeps its native window buttons on the frameless window, so only other systems need a close button. */}
       {/* macOS 在无边框窗口上保留原生窗口按钮，因此只有其他系统需要关闭按钮。 */}

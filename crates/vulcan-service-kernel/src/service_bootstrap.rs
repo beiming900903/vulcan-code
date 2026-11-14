@@ -642,13 +642,18 @@ fn run_service_bootstrap(
             }
         };
     let (luaskills_runtime, luaskills_catalog, luaskills_step_status, luaskills_step_message) =
-        match vulcan_service_runtime::luaskills_bridge::bootstrap_luaskills(
-            |message| update_luaskills_bootstrap_progress(state, event_emitter, &logs, message),
-            |progress| {
-                update_managed_runtime_bootstrap_progress(state, event_emitter, &logs, progress)
-            },
-            luaskills_github_token,
-        ) {
+        match {
+            // Own the upstream archive progress callback only for the synchronous bootstrap.
+            // 仅在同步引导期间持有上游归档进度回调。
+            let _downloads = StartupSkillDownloads::install(state, event_emitter);
+            vulcan_service_runtime::luaskills_bridge::bootstrap_luaskills(
+                |message| update_luaskills_bootstrap_progress(state, event_emitter, &logs, message),
+                |progress| {
+                    update_managed_runtime_bootstrap_progress(state, event_emitter, &logs, progress)
+                },
+                luaskills_github_token,
+            )
+        } {
             Ok(runtime_handle) => {
                 // managed_runtime_report is diagnostic-only and cannot invalidate an otherwise usable engine.
                 // managed_runtime_report 仅用于诊断，不能使原本可用的引擎失效。
@@ -754,44 +759,6 @@ fn run_service_bootstrap(
         (result, prewarm_started.elapsed())
     });
 
-    update_startup(state, event_emitter, "bootstrapping-mcp", &logs, |now| {
-        startup_steps_with_status(
-            now,
-            &[
-                (
-                    "service-process",
-                    StartupStepStatus::Ready,
-                    "Core Service started",
-                ),
-                (
-                    "data-store",
-                    StartupStepStatus::Ready,
-                    "Application data store ready",
-                ),
-                (
-                    "luaskills",
-                    luaskills_step_status,
-                    luaskills_step_message.as_str(),
-                ),
-                (
-                    "mcp",
-                    StartupStepStatus::Running,
-                    "Initializing the agent MCP runtime and plugin hook runtime",
-                ),
-                (
-                    "plugins",
-                    StartupStepStatus::Running,
-                    "Warming up the enabled plugin hook runtimes in the background",
-                ),
-                (
-                    "workspace",
-                    StartupStepStatus::Pending,
-                    "Waiting for the workspace database to load",
-                ),
-            ],
-        )
-    });
-
     // The service owns no second MCP transport: the single Agent MCP runtime below is the only
     // runtime authority, and its catalog is projected for the UI after it is bootstrapped.
     // 服务不持有第二套 MCP 传输：下方唯一的 Agent MCP 运行时是唯一运行时权威，
@@ -822,8 +789,8 @@ fn run_service_bootstrap(
                     ),
                     (
                         "mcp",
-                        StartupStepStatus::Running,
-                        "Initializing the agent MCP runtime",
+                        StartupStepStatus::Pending,
+                        "Waiting for plugins to finish preparing",
                     ),
                     (
                         "plugins",
@@ -839,8 +806,8 @@ fn run_service_bootstrap(
             )
         },
     );
-    // plugin_prewarm_join_started_at measures only the remaining wait after MCP overlap completes.
-    // plugin_prewarm_join_started_at 仅测量 MCP 重叠阶段结束后的剩余等待。
+    // Measure the remaining wait for hook runtimes before resolving MCP producers.
+    // 测量解析 MCP 生产者前剩余的 Hook 运行时等待。
     let plugin_prewarm_join_started_at = start_bootstrap_stage("plugin_prewarm_join");
     let (prewarmed_plugin_ids, plugin_prewarm_elapsed) =
         runtime.block_on(plugin_prewarm_task).map_err(|error| {
@@ -1055,8 +1022,16 @@ fn run_service_bootstrap(
             format!("Invalid plugin MCP runtime configuration: {error}"),
         )
     })?;
-    // mcp_started_at measures the single Agent MCP runtime bootstrap and its catalog projection.
-    // mcp_started_at 测量唯一的 Agent MCP 运行时引导及其目录投影。
+    advance_runtime_startup(
+        state,
+        event_emitter,
+        &logs,
+        (luaskills_step_status, &luaskills_step_message),
+        "mcp",
+        "Starting MCP servers and discovering tools",
+    );
+    // Measure MCP startup independently of Provider and memory work.
+    // 独立测量 MCP 启动，排除供应商与记忆初始化工作。
     let mcp_started_at = start_bootstrap_stage("mcp");
     // Original startup ownership stays armed across readiness, full native publication and later service assembly.
     // 原启动所有权跨就绪、完整原生发布及随后服务装配保持启用。
@@ -1073,6 +1048,7 @@ fn run_service_bootstrap(
                 format!("Agent MCP runtime initialization failed: {error}"),
             )
         })?;
+    trace_bootstrap_stage("mcp", mcp_started_at, "result=initialized");
     // The initial unpublished bridge shares all original admission and cleanup registries.
     // 首次未发布桥共享全部原入场及清理注册表。
     let agent_mcp_runtime = pending_mcp_bootstrap.access();
@@ -1103,6 +1079,17 @@ fn run_service_bootstrap(
     })?;
     // credentialStore binds every new credential mutation to the Controller-owned application SQLite database.
     // credentialStore 将全部新凭据变更绑定到 Controller 持有的应用 SQLite 数据库。
+    advance_runtime_startup(
+        state,
+        event_emitter,
+        &logs,
+        (luaskills_step_status, &luaskills_step_message),
+        "providers",
+        "Restoring provider manifests and refreshing model catalogs",
+    );
+    // Measure the original Provider stage, including persisted manifest recovery.
+    // 测量供应商阶段，包括已持久化清单恢复。
+    let provider_startup = start_bootstrap_stage("provider_catalogs");
     let credential_store = Arc::new(
         crate::ai_credential_secret_store::SqliteAiCredentialSecretStore::new(
             controller_runtime.clone(),
@@ -1248,6 +1235,7 @@ fn run_service_bootstrap(
             format!("Failed to publish the system manifest recovery event: {error}"),
         )
     })?;
+    trace_bootstrap_stage("provider_catalogs", provider_startup, "result=ready");
     // providerTaskRecoveryRuntime resumes only confirmed task identifiers and never replays
     // interrupted dispatch intents.
     // providerTaskRecoveryRuntime 仅恢复已确认任务标识，绝不重放中断的分派意图。
@@ -1394,6 +1382,17 @@ fn run_service_bootstrap(
         }
     };
 
+    advance_runtime_startup(
+        state,
+        event_emitter,
+        &logs,
+        (luaskills_step_status, &luaskills_step_message),
+        "memory",
+        "Opening memory storage and restoring pending analysis",
+    );
+    // Measure local memory initialization and pending analysis queue recovery.
+    // 测量本机记忆初始化和待处理分析队列恢复。
+    let memory_startup = start_bootstrap_stage("native_memory");
     let global_vmm_effective =
         vulcan_vmm::VmmEffectiveConfig::resolve(&provider_configuration.vmm, None, None);
     // nativeVmmBootstrap initializes one independent local backend without making ExternalGrpc
@@ -1486,6 +1485,15 @@ fn run_service_bootstrap(
             return Err(ServiceBootstrapError::new("workspace", "Workspace", error));
         }
     };
+    trace_bootstrap_stage("native_memory", memory_startup, "result=initialized");
+    advance_runtime_startup(
+        state,
+        event_emitter,
+        &logs,
+        (luaskills_step_status, &luaskills_step_message),
+        "agent-runtime",
+        "Assembling the agent runtime and publishing its tools",
+    );
     let task_runtime = Arc::new(TaskRuntime::new());
     // The browser service bearer lives in its discovery snapshot; register it before any
     // model tool can run so a shell reading that file cannot persist or replay the credential.
@@ -1553,6 +1561,9 @@ fn run_service_bootstrap(
         conversation_hook_runtime: Arc::new(Mutex::new(conversation_hook_runtime)),
         vmm_hook_runtime,
     };
+    // Track MCP publication separately from MCP transport startup.
+    // 单独跟踪 MCP 发布，与 MCP 传输启动区分。
+    let mcp_publication = start_bootstrap_stage("mcp_publication");
     // Exclusive unpublished bridge ownership precedes every source and native publication guard.
     // 排他未发布桥所有权先于每个来源及原生发布守卫。
     let pending_mcp_bootstrap = pending_mcp_bootstrap
@@ -1570,8 +1581,8 @@ fn run_service_bootstrap(
         &agent_runtime.extension_generation.mcp_runtime(),
     );
     trace_bootstrap_stage(
-        "mcp",
-        mcp_started_at,
+        "mcp_publication",
+        mcp_publication,
         format!(
             "configured={} connected={} tools={}",
             mcp_catalog.configured_server_count,
@@ -1727,6 +1738,21 @@ fn run_service_bootstrap(
                 ),
                 ("mcp", StartupStepStatus::Ready, "MCP runtime initialized"),
                 (
+                    "providers",
+                    StartupStepStatus::Ready,
+                    "Provider model catalogs ready",
+                ),
+                (
+                    "memory",
+                    StartupStepStatus::Ready,
+                    "Memory initialization finished",
+                ),
+                (
+                    "agent-runtime",
+                    StartupStepStatus::Ready,
+                    "Agent runtime ready",
+                ),
+                (
                     "plugins",
                     StartupStepStatus::Ready,
                     "Plugin catalog and enabled runtimes ready",
@@ -1859,6 +1885,21 @@ fn run_service_bootstrap(
                     luaskills_step_message.as_str(),
                 ),
                 ("mcp", StartupStepStatus::Ready, "MCP runtime initialized"),
+                (
+                    "providers",
+                    StartupStepStatus::Ready,
+                    "Provider model catalogs ready",
+                ),
+                (
+                    "memory",
+                    StartupStepStatus::Ready,
+                    "Memory initialization finished",
+                ),
+                (
+                    "agent-runtime",
+                    StartupStepStatus::Ready,
+                    "Agent runtime ready",
+                ),
                 (
                     "plugins",
                     StartupStepStatus::Ready,

@@ -654,7 +654,7 @@ async function runDesktopGui(): Promise<void> {
     const instance = await ensureServiceInstance(
       description,
       options.forwardedArguments,
-      (progress: ServiceStartupProgress) => reportStartupStage(window, progress.message),
+      (progress: ServiceStartupProgress) => reportStartupStage(window, progress),
       text,
     );
     guiState.instance = instance;

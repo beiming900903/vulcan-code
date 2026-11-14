@@ -29,10 +29,14 @@ pub struct StartupStepSnapshot {
     /// 活动下载的可选总字节数。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_bytes: Option<u64>,
-    /// Optional native managed-runtime progress phase.
-    /// 可选的原生受管运行时进度阶段。
+    /// Optional download or managed-runtime progress phase.
+    /// 可选的下载或受管运行时进度阶段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress_phase: Option<String>,
+    /// Stable skill identity for an active ROOT archive download.
+    /// 当前 ROOT 归档下载的稳定技能标识。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_id: Option<String>,
     /// Optional timestamp for the most recent status update.
     /// 最近一次状态更新的可选时间戳。
     pub updated_at: Option<OffsetDateTime>,

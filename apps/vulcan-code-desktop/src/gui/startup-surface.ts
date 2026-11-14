@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import path from 'node:path';
 
 import type { DesktopLocale } from './desktop-text.js';
+import type { ServiceStartupProgress } from './service-launcher.js';
 import { APPEARANCE_FILE_VERSION, parseStartupAppearance, type StartupAppearance } from './startup-appearance.js';
 
 // STARTUP_PAGE_FILE is the page `scripts/desktop-runtime.mjs` copies into `startup/` beside `gui/`.
@@ -92,20 +93,20 @@ function isStartupPageShown(window: BrowserWindow): boolean {
 
 // callStartupPage runs one call of the page's `window.vulcanDesktopStartup` interface with a JSON-encoded message.
 // callStartupPage 以 JSON 编码的消息调用页面 `window.vulcanDesktopStartup` 接口的一个方法。
-function callStartupPage(window: BrowserWindow, method: 'progress' | 'failed', message: string): Promise<unknown> {
+function callStartupPage(window: BrowserWindow, method: 'progress' | 'failed', payload: ServiceStartupProgress | string): Promise<unknown> {
   return window.webContents.executeJavaScript(
-    `window.vulcanDesktopStartup && window.vulcanDesktopStartup.${method}(${JSON.stringify(message)});`,
+    `window.vulcanDesktopStartup && window.vulcanDesktopStartup.${method}(${JSON.stringify(payload)});`,
     true,
   );
 }
 
 // reportStartupStage shows one real startup stage on the startup page.
 // reportStartupStage 在启动页显示一个真实启动阶段。
-// Parameters: window is the workbench window; message is the localized stage text.
-// 参数：window 为工作台窗口；message 为本地化阶段文本。
-export function reportStartupStage(window: BrowserWindow, message: string): void {
+// Parameters: window owns the startup page and progress carries Core state or localized launcher text.
+// 参数：window 持有启动页，progress 携带 Core 状态或本地化启动器文本。
+export function reportStartupStage(window: BrowserWindow, progress: ServiceStartupProgress): void {
   if (window.isDestroyed() || !isStartupPageShown(window)) return;
-  void callStartupPage(window, 'progress', message);
+  void callStartupPage(window, 'progress', progress);
 }
 
 // showStartupFailure shows the failure on the startup page, returning to the page when the window had already left it

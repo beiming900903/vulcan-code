@@ -10,6 +10,9 @@ import defaultBootCatalog from "@catalogs/boot/en-US.json";
 // BootText stores the minimal boot-screen labels: the shared progress copy plus the boot failure copy.
 // BootText 保存最小启动屏文案：共用进度文案加上启动失败文案。
 export interface BootText extends StartupProgressLabels {
+  // Localized skill download wording is available before the main language catalog loads.
+  // 完整语言目录加载前即可使用本地化技能下载文案。
+  downloadingSkill: string;
   // Startup failure prefix.
   // 启动失败前缀。
   failedPrefix: string;

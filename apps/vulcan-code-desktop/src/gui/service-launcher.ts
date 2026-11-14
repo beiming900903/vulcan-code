@@ -34,6 +34,10 @@ const READY_POLL_INTERVAL_MS = 100;
 /** Per-request timeout when probing the service health endpoint. */
 const HEALTH_TIMEOUT_MS = 2_000;
 
+/** Maximum wait for an optional startup snapshot before resuming discovery.
+ * 等待可选启动快照的最长时间，到期继续发现。 */
+const STARTUP_SNAPSHOT_TIMEOUT_MS = 500;
+
 /** One validated service launch description. */
 export interface ServiceLaunchDescription {
   /** Launch protocol version understood by this GUI. */
@@ -80,6 +84,53 @@ export interface ServiceStartupProgress {
   stage: string;
   /** Localized, user-facing description of the current stage. */
   message: string;
+  /** Last Core snapshot for display, with only renderer-safe startup fields.
+   * 供界面显示的 Core 最新快照，仅包含启动展示字段。 */
+  snapshot?: ServiceStartupSnapshot;
+}
+
+/** Renderer projection of the existing Core startup RPC.
+ * 既有 Core 启动 RPC 的渲染投影。 */
+export interface ServiceStartupSnapshot {
+  /** Core-owned readiness, phase, locale, and ordered step data.
+   * Core 持有的就绪标记、阶段、语言及有序步骤数据。 */
+  ready: boolean;
+  phase: string;
+  uiLocale?: string;
+  steps: unknown[];
+}
+
+/** Reads startup progress from the verified instance while keeping its token in the main process.
+ * 从已验证的实例读取启动进度，将令牌留在主进程内。
+ * `instance` supplies the verified loopback URL and token; returns null if no snapshot is available.
+ * `instance` 提供已验证的回环地址与令牌；快照不可用时返回 null。 */
+async function readStartupSnapshot(instance: LiveServiceInstance): Promise<ServiceStartupSnapshot | null> {
+  try {
+    // Use the startup-only RPC without following a redirect or waiting on the business runtime.
+    // 调用专用启动 RPC，不跟随重定向，也不等待业务运行时。
+    const response = await fetch(`${instance.baseUrl}/rpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-vulcan-service-token': instance.serviceToken },
+      body: JSON.stringify({ method: 'startup.snapshot' }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(STARTUP_SNAPSHOT_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    // Forward only fields consumed by the startup renderer.
+    // 仅转发启动渲染器消费的字段。
+    const envelope = await response.json() as { ok?: boolean; result?: Partial<ServiceStartupSnapshot> };
+    const snapshot = envelope.result;
+    if (envelope.ok !== true || !snapshot || typeof snapshot.ready !== 'boolean'
+      || typeof snapshot.phase !== 'string' || !Array.isArray(snapshot.steps) || !snapshot.steps.length) return null;
+    return {
+      ready: snapshot.ready, phase: snapshot.phase, steps: snapshot.steps,
+      ...(typeof snapshot.uiLocale === 'string' ? { uiLocale: snapshot.uiLocale } : {}),
+    };
+  } catch {
+    // Missing progress does not change the verified health state or launch deadline.
+    // 进度不可用不改变已验证的健康状态或启动截止时间。
+    return null;
+  }
 }
 
 /** Resolves the service executable for this build. */
@@ -295,6 +346,9 @@ export async function ensureServiceInstance(
   // The deadline also bounds reuse of an owner that has not finished bootstrap.
   // 此截止时间同样限制对尚未完成初始化的既有所有者的等待。
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  // Keep the last published display fields so unchanged probes do not rerender.
+  // 保留上次发布的展示字段，避免无变化的探测触发重渲染。
+  let previousSnapshot = '';
   for (;;) {
     const instance = await readLiveServiceInstance(description.discoveryPath);
     if (instance?.status === 'ready') {
@@ -303,6 +357,20 @@ export async function ensureServiceInstance(
     }
     if (instance && instance.status !== 'starting') {
       throw new Error(formatDesktopText(text.serviceUnavailable, { status: instance.status }));
+    }
+    if (instance?.status === 'starting') {
+      // Only a Core identity verified by /health is allowed to supply progress.
+      // 仅允许经过 /health 验证的 Core 身份提供进度。
+      const snapshot = await readStartupSnapshot(instance);
+      if (snapshot) {
+        // Ignore step timestamps when checking whether the display has changed.
+        // 判断展示是否变化时忽略步骤时间戳。
+        const fingerprint = JSON.stringify(snapshot, (key, value: unknown) => key === 'updatedAt' ? undefined : value);
+        if (fingerprint !== previousSnapshot) {
+          previousSnapshot = fingerprint;
+          report({ stage: snapshot.phase, message: text.awaitingReady, snapshot });
+        }
+      }
     }
     // A starting owner that disappears before readiness no longer holds the lock, so launch once ourselves.
     // 启动中的所有者在就绪前消失后不再持有锁，因此由本 GUI 自行启动一次。
