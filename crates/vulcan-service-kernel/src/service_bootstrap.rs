@@ -641,19 +641,20 @@ fn run_service_bootstrap(
                 None
             }
         };
+    // Keep the archive progress callback scoped to synchronous bootstrap.
+    // 归档下载进度回调的生效范围仅限同步引导。
+    let bootstrap_result = {
+        let _downloads = StartupSkillDownloads::install(state, event_emitter);
+        vulcan_service_runtime::luaskills_bridge::bootstrap_luaskills(
+            |message| update_luaskills_bootstrap_progress(state, event_emitter, &logs, message),
+            |progress| {
+                update_managed_runtime_bootstrap_progress(state, event_emitter, &logs, progress)
+            },
+            luaskills_github_token,
+        )
+    };
     let (luaskills_runtime, luaskills_catalog, luaskills_step_status, luaskills_step_message) =
-        match {
-            // Own the upstream archive progress callback only for the synchronous bootstrap.
-            // 仅在同步引导期间持有上游归档进度回调。
-            let _downloads = StartupSkillDownloads::install(state, event_emitter);
-            vulcan_service_runtime::luaskills_bridge::bootstrap_luaskills(
-                |message| update_luaskills_bootstrap_progress(state, event_emitter, &logs, message),
-                |progress| {
-                    update_managed_runtime_bootstrap_progress(state, event_emitter, &logs, progress)
-                },
-                luaskills_github_token,
-            )
-        } {
+        match bootstrap_result {
             Ok(runtime_handle) => {
                 // managed_runtime_report is diagnostic-only and cannot invalidate an otherwise usable engine.
                 // managed_runtime_report 仅用于诊断，不能使原本可用的引擎失效。
